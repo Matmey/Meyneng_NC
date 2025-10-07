@@ -1,8 +1,27 @@
-# **Thio Long reads Analysis**
+# **Coastal ecosystem degradation driven by decades of unregulated terrestrial mining**
+
+**This is a workflow to reproduce analysis conduced in Meyneng et al. (2025).**
 
 Date: 08/08/2025
-Author: Arthur Monjot
-Dependencies: ITSx; networkx; seqkit
+
+Authors: Mathisse Meyneng and Arthur Monjot
+
+Dependencies: R; ITSx; networkx; seqkit
+
+First, clone github repository: `git clone https://github.com/Matmey/Meyneng_NC.git`
+
+##
+
+
+
+
+
+
+
+
+
+
+
 
 
 ## I. Install dependencies
@@ -24,9 +43,9 @@ gunzip rawdata/OBAMA01_Boxes-4_FullSequences_with-OTU-IDs.fasta.gz
 ### I.B. Extract 18S with ITSx
 
 ```
-mkdir -p result/region/
-ITSx -i rawdata/OBAMA01_Boxes-4_FullSequences_with-OTU-IDs.fasta -o result/region/Thio_LR_extracted --preserve T --cpu 12 --save_regions all
-cat result/region/Thio_LR_extracted.SSU.fasta | grep "^>" | wc -l
+mkdir -p Outputs/LongReads_analysis/region/
+ITSx -i rawdata/OBAMA01_Boxes-4_FullSequences_with-OTU-IDs.fasta -o Outputs/LongReads_analysis/region/Thio_LR_extracted --preserve T --cpu 12 --save_regions all
+cat Outputs/LongReads_analysis/region/Thio_LR_extracted.SSU.fasta | grep "^>" | wc -l
 ```
 
 7055 SSU derived from LR sequences remain.
@@ -41,8 +60,8 @@ reverse complement: TYRATCAAGAACGAAAGT
 "T[CT][AG]ATCAAGAACGAAAGT"
 
 ```
-nohup cutadapt -a TYRATCAAGAACGAAAGT";min_overlap=18" -o result/region/Thio_LR_cutadapt_trimmed.V4.fasta --action retain -e 0.2 --discard-untrimmed result/region/Thio_LR_extracted.SSU.fasta > result/region/Thio_LR_cutadapt_trimmed.V4.log
-cat result/region/Thio_LR_cutadapt_trimmed.V4.fasta | grep "^>" | wc -l
+nohup cutadapt -a TYRATCAAGAACGAAAGT";min_overlap=18" -o Outputs/LongReads_analysis/region/Thio_LR_cutadapt_trimmed.V4.fasta --action retain -e 0.2 --discard-untrimmed Outputs/LongReads_analysis/region/Thio_LR_extracted.SSU.fasta > Outputs/LongReads_analysis/region/Thio_LR_cutadapt_trimmed.V4.log
+cat Outputs/LongReads_analysis/region/Thio_LR_cutadapt_trimmed.V4.fasta | grep "^>" | wc -l
 ```
 
 6841 sequences remain after the selection with cutadapt. This is pretty better than the solution using regular expression (i.e. 5725).
@@ -52,11 +71,11 @@ I.D. Check the mean length of the V4 trimmed from LR sequences
 We use the seqkit tool:
 
 ```
-seqkit stats result/region/Thio_LR_cutadapt_trimmed.V4.fasta > result/region/Thio_LR_cutadapt_trimmed.V4.stat
+seqkit stats Outputs/LongReads_analysis/region/Thio_LR_cutadapt_trimmed.V4.fasta > Outputs/LongReads_analysis/region/Thio_LR_cutadapt_trimmed.V4.stat
 ```
 
-file                                            | format | type | num_seqs |   sum_len | min_len | avg_len | max_len
-result/region/Thio_LR_cutadapt_trimmed.V4.fasta | FASTA  | DNA  |    6,841 | 2,642,458 |     236 |   386.3 |     555
+file                                                                | format | type | num_seqs |   sum_len | min_len | avg_len | max_len
+Outputs/LongReads_analysis/region/Thio_LR_cutadapt_trimmed.V4.fasta | FASTA  | DNA  |    6,841 | 2,642,458 |     236 |   386.3 |     555
 
 
 ## II. SR data
@@ -65,8 +84,8 @@ result/region/Thio_LR_cutadapt_trimmed.V4.fasta | FASTA  | DNA  |    6,841 | 2,6
 
 We have a csv table with in column 1 the header and in column 2 the sequence. We have to transform this file in fasta file.
 ```
-cat rawdata/database_18SV4_Thio.csv | awk -F";" '{print ">"$1"\n"$2}' | tail -n+3 > result/region/Thio_SR_OTUs.V4.fasta
-cat result/region/Thio_SR_OTUs.V4.fasta | grep ">" | wc -l
+cat rawdata/database_18SV4_Thio.csv | awk -F";" '{print ">"$1"\n"$2}' | tail -n+3 > Outputs/LongReads_analysis/region/Thio_SR_OTUs.V4.fasta
+cat Outputs/LongReads_analysis/region/Thio_SR_OTUs.V4.fasta | grep ">" | wc -l
 ```
 
 They are 25250 SR OTUs sequences.
@@ -86,7 +105,7 @@ The SR forward primer: TAReukFWD1
 Since bot primers are very closed in their position on the SSU, we choose to not trim the SR
 
 ```
-#nohup cutadapt -g ASCYGYGGTAAYWCCAGC -o result/region/Thio_SR_cutadapt_trimmed.V4.fasta --action retain -e 0.2 result/region/Thio_SR_OTUs.V4.fasta > result/region/Thio_SR_OTUs_cutadapt_trimmed.V4.log
+#nohup cutadapt -g ASCYGYGGTAAYWCCAGC -o Outputs/LongReads_analysis/region/Thio_SR_cutadapt_trimmed.V4.fasta --action retain -e 0.2 Outputs/LongReads_analysis/region/Thio_SR_OTUs.V4.fasta > Outputs/LongReads_analysis/region/Thio_SR_OTUs_cutadapt_trimmed.V4.log
 ```
 
 II.C. Check the mean length of the V4 trimmed from SR sequences
@@ -94,11 +113,11 @@ II.C. Check the mean length of the V4 trimmed from SR sequences
 We use seqkit tool:
 
 ```
-seqkit stats result/region/Thio_SR_OTUs.V4.fasta > result/region/Thio_SR_OTUs.V4.stat
+seqkit stats Outputs/LongReads_analysis/region/Thio_SR_OTUs.V4.fasta > Outputs/LongReads_analysis/region/Thio_SR_OTUs.V4.stat
 ```
 
-file                                | format | type | num_seqs |   sum_len | min_len | avg_len | max_len
-result/region/Thio_SR_OTUs.V4.fasta | FASTA  | DNA  |   25,250 | 8,573,229 |     232 |   339.5 |     451
+file                                                    | format | type | num_seqs |   sum_len | min_len | avg_len | max_len
+Outputs/LongReads_analysis/region/Thio_SR_OTUs.V4.fasta | FASTA  | DNA  |   25,250 | 8,573,229 |     232 |   339.5 |     451
 
 
 ## III. Clustering LR and SR derived V4 region and SSN-based analysis
@@ -109,9 +128,9 @@ We use Vsearch to align all LR and SR-derived region.
 We check, in the same time, if the query and subject sequence length is up to 80% in coverage.
 
 ```
-mkdir result/Clustering/
-cat result/region/Thio_SR_OTUs.V4.fasta result/region/Thio_LR_cutadapt_trimmed.V4.fasta > result/Clustering/All_V4_sequences.fasta
-vsearch --allpairs_global result/Clustering/All_V4_sequences.fasta --id 0.8 --query_cov 0.8 --target_cov 0.8 --threads 12 --blast6out result/Clustering/All_V4_allvsall_cover80.tsv
+mkdir Outputs/LongReads_analysis/Clustering/
+cat Outputs/LongReads_analysis/region/Thio_SR_OTUs.V4.fasta Outputs/LongReads_analysis/region/Thio_LR_cutadapt_trimmed.V4.fasta > Outputs/LongReads_analysis/Clustering/All_V4_sequences.fasta
+vsearch --allpairs_global Outputs/LongReads_analysis/Clustering/All_V4_sequences.fasta --id 0.8 --query_cov 0.8 --target_cov 0.8 --threads 12 --blast6out Outputs/LongReads_analysis/Clustering/All_V4_allvsall_cover80.tsv
 ```
 
 It takes a while!
