@@ -30,7 +30,9 @@ rawdata/ - Contains all raw data required for the analyses.
 
 Main_results.r - R script for all main analyses and figure generation.
 
-LongRead_analysis.Rmd - R script for network analysis of long-read data.
+LongRead_analysis.md - Bash script for analysis of long-read data.
+
+Process_LR_analysis_figure.Rmd - R script for network analysis of long read and short read
 
 
     

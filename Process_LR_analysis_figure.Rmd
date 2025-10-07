@@ -196,7 +196,7 @@ print("Unique taxonomic affiliation within CCs")
 sort(unique(q$rTaxo))
 OTUs_of_interest <- q %>% filter(Type=="LR") %>% select(name)
 OTUs_of_interest$name <- sub(".*_","", OTUs_of_interest$name)
-write.table(OTUs_of_interest,file="result/subset_CCs_thio_list.txt",col.names = FALSE, row.names = FALSE,quote = FALSE)
+write.table(OTUs_of_interest,file="Outputs/LongReads_analysis/subset_CCs_thio_list.txt",col.names = FALSE, row.names = FALSE,quote = FALSE)
 ```
 
 ```{r plot, echo=TRUE, fig.height=10, fig.width=18}
