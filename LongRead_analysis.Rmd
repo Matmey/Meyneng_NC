@@ -1,0 +1,237 @@
+---
+title: "LongReads_Fungi_study"
+author: "Arthur Monjot"
+lang: en
+date: "2025-07-31"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## I. Setup 
+### I.A. Working directory and seed
+We define the working directory (i.e. *Long_Reads_Fungi/*) for the R analysis and create a *Outputs* folder in which the figures and other results will be generated.
+```{r setup, echo=TRUE, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+setwd(".")
+if (dir.exists("Outputs/LongReads_analysis/") == FALSE) {system("mkdir -p Outputs/LongReads_analysis/")}
+set.seed(123)
+```
+
+### I.B. Library 
+We import R package.
+```{r lib, echo=TRUE, message=FALSE, warning=FALSE}
+# Packages
+pkg <- c("ggplot2","data.table","dplyr","tidyr","tibble","stringr","elementalist","svglite","readxl","igraph","ggraph","tidygraph")
+lapply(pkg, require, character.only = TRUE)
+```
+Each "TRUE" corresponds to the correct importation of each R package. 
+
+### I.C. Custom function 
+Then, we import custom function (e.g. to generate rarefaction curve in multithread)
+```{r custom function, echo=TRUE, message=FALSE, warning=FALSE}
+# Theme graph
+theme_unique_art_graph <- function (base_size = 12, base_family = "") {
+  ret <- (theme_minimal(base_size = base_size, base_family = base_family) +
+            theme(text = element_text(colour = "black"),
+                  title = element_text(color = "black", face = "bold", vjust = 0.5, hjust = 0.5),
+                  axis.ticks = element_blank(),
+                  axis.text = element_blank(),
+                  axis.title = element_blank(),
+                  line = element_line(color = "black"),
+                  rect = element_rect(fill = "white", color = "black"),
+                  legend.background = element_blank(),
+                  legend.key = element_rect(fill = NA, color = NA, linetype = 0),
+                  legend.text = element_text(size = 8),
+                  legend.title = element_text(size = 12, face="bold"),
+                  panel.background = element_rect_round(radius = unit(0.5, "cm"),fill = "white", color = NULL,size = 1),
+                  strip.text = element_text(size = 12,color="black",face="bold",vjust=.5,hjust=.5),
+                  panel.border = element_blank(),
+                  plot.background = element_rect(fill = "white", colour = "white", linetype = 0)))
+  ret
+}
+```
+
+## II. Charge raw table and formatting
+We import the OTUs table for LR dataset.
+```{r otu_table_LR, echo=TRUE}
+otu_table_LR <- readxl::read_xlsx("rawdata/OBAMA01_Boxes-4.xlsx",sheet = "OtuTable")
+taxo_LR <- readxl::read_xlsx("rawdata/OBAMA01_Boxes-4.xlsx",sheet = "Taxonomy")
+```
+
+We then format table with adequate column and row names.
+```{r formatting, echo=TRUE}
+## OTU table
+otu_table_LR <- otu_table_LR %>% column_to_rownames("OTU")
+otu_table_LR <- as.matrix(otu_table_LR)
+colnames(otu_table_LR) <- gsub("T", "", colnames(otu_table_LR))
+```
+
+## III. Clustering analysis
+### IV.A. Prepare LR otu table
+```{r modify otu_table_LR, echo=TRUE}
+otu_table_LR <- merge(otu_table_LR, taxo_LR, by.x="row.names", by.y="OTU")
+otu_table_LR <- otu_table_LR %>% mutate(Row.names=paste0("LR_",Row.names)) %>% column_to_rownames("Row.names") %>% select(-NegC_2,-TotalAbundance,-Occurrence)
+otu_table_LR <- otu_table_LR %>% mutate(Taxo=paste("Eukaryota",Kingdom,Phylum,Class,Order,Family,Genus,Species,sep=";"))
+```
+
+### IV.B. Short read data
+We import the OTUs table of SR dataset.
+```{r otu_table_SR rdata version, echo=TRUE}
+phylo_rar <- readRDS("~/Desktop/Article/2025/Long Reads New_caledonia/Long_Reads_Fungi/rawdata/phylo_rar.rds")
+otu_table_SR_rar <- merge(phylo_rar@tax_table,phylo_rar@otu_table,by="row.names")
+otu_table_SR_rar[otu_table_SR_rar==""] <- NA
+otu_table_SR_rar <- otu_table_SR_rar %>% mutate(Row.names=paste0("SR_",Row.names)) %>% column_to_rownames("Row.names")
+otu_table_SR_rar <- otu_table_SR_rar %>% mutate(Taxo=paste(Domain,Supergroup,Division,Subdivision,Class,Order,Family,Genus,Species,sep=";"))
+otu_table_SR <- otu_table_SR_rar
+```
+
+### IV.C. Compute sedimentary unit and abundance for each ASVs
+```{r charge sediment unit description, echo=TRUE}
+sedimentary_file <- read.table("rawdata/sample_data_Thio.csv", sep = ";", header = TRUE)
+SED_1 <- sedimentary_file[,"Sample_ID"][sedimentary_file[,"Part"]=="I"]
+SED_2 <- sedimentary_file[,"Sample_ID"][sedimentary_file[,"Part"]=="II"]
+SED_3 <- sedimentary_file[,"Sample_ID"][sedimentary_file[,"Part"]=="III"]
+SED_4 <- sedimentary_file[,"Sample_ID"][sedimentary_file[,"Part"]=="IV"]
+#SED_5 <- sedimentary_file[,"Sample_ID"][sedimentary_file[,"Part"]=="V"]
+otu_table_LR_sed <- otu_table_LR %>% 
+  mutate(I=rowSums(otu_table_LR[,all_of(SED_1[SED_1 %in% colnames(otu_table_LR)])])) %>%
+  mutate(II=rowSums(otu_table_LR[,all_of(SED_2[SED_2 %in% colnames(otu_table_LR)])])) %>%
+  mutate(III=rowSums(otu_table_LR[,all_of(SED_3[SED_3 %in% colnames(otu_table_LR)])])) %>%
+  mutate(IV=rowSums(otu_table_LR[,all_of(SED_4[SED_4 %in% colnames(otu_table_LR)])])) #%>%
+  #mutate(V=rowSums(otu_table_LR[,all_of(SED_5[SED_5 %in% colnames(otu_table_LR)])]))
+otu_table_SR_sed <- otu_table_SR %>% 
+  mutate(I=rowSums(as.data.frame(lapply((otu_table_SR[,all_of(SED_1[SED_1 %in% colnames(otu_table_SR)])]),as.numeric)))) %>%
+  mutate(II=rowSums(as.data.frame(lapply((otu_table_SR[,all_of(SED_2[SED_2 %in% colnames(otu_table_SR)])]),as.numeric)))) %>%
+  mutate(III=rowSums(as.data.frame(lapply((otu_table_SR[,all_of(SED_3[SED_3 %in% colnames(otu_table_SR)])]),as.numeric)))) %>%
+  mutate(IV=rowSums(as.data.frame(lapply((otu_table_SR[,all_of(SED_4[SED_4 %in% colnames(otu_table_SR)])]),as.numeric)))) #%>%
+  #mutate(V=rowSums(as.data.frame(lapply((otu_table_SR[,all_of(SED_5[SED_5 %in% colnames(otu_table_SR)])]),as.numeric))))
+```
+
+### III.A. Join taxonomy and Charge the 656 ASVs
+```{r joint taxonomy, echo=TRUE}
+taxo_file <- rbind(otu_table_LR_sed %>% select(Taxo,I,II,III,IV),otu_table_SR_sed %>% select(Taxo,I,II,III,IV))
+nrow(taxo_file)
+```
+There is 21611 LR and SR.
+
+We import the list of ASVs (i.e. 656 ASVs) which are differentially abundant in the first sedimentary unit and affiliated to unaffiliated fungi
+```{r charge the 656 differentially abundant ASVs, echo=TRUE}
+ASVs_656 <- read.table("rawdata/tax_table_656ASV_Thio.csv", sep = ";",header = TRUE)
+ASVs_656 <- ASVs_656 %>% select(ASV_ID) %>% mutate(ASVs_Id=paste0("SR_",ASV_ID))
+ASVs_656_str <- ASVs_656$ASVs_Id
+```
+
+### III.B. Graph
+First we import the edges. We sort them using ID% and alignment length (i.e. each couple of sequences must be characterized by at least 97% of identity along at least 200 bp).
+```{r charge edge, echo=TRUE}
+edges_input <- fread("Outputs/LongReads_analysis/Clustering/All_V4_allvsall_cover80.tsv", sep = "\t", col.names = c("Query","Target","ID%","alnlen","mism","opens","qlo","qhi","tlo","thi","evalue","bits"))
+paste("LR and SR in all vs all files:",length(unique(c(edges_input$Target,edges_input$Query))))
+edges_input <- edges_input %>% select(Query,Target,`ID%`,alnlen) %>% filter(`ID%` >= 97 & alnlen >= 200)
+edges_input <- edges_input %>% mutate(
+  Query = ifelse(grepl("OTU=",Query),paste0("LR_",sub(";.*","",gsub("OTU=","",Query))),paste0("SR_",Query)),
+  Target = ifelse(grepl("OTU=",Target),paste0("LR_",sub(";.*","",gsub("OTU=","",Target))),paste0("SR_",Target))
+)
+edges_input_sort <- edges_input %>% distinct() %>% group_by(Query,Target) %>% summarise(`ID%`=max(`ID%`),alnlen=max(alnlen), .groups = "drop")
+paste("LR and SR in all vs all files filtered with tresholds (97%; 200bp):",length(unique(c(edges_input$Target,edges_input$Query))))
+```
+There are only 22934 SR and LR in the resulted alignment file *all vs all* and only 11037 by selecting those exceeding chosen threshold (97%; 200bp) 
+
+Then we create the igraph object using the previously imported edges data frame. We finally decompose it in components.
+```{r prepare igraph object and decompose, echo=TRUE}
+# Vertex
+vertex <- taxo_file %>% rownames_to_column("vertices")
+edges_input_df <- edges_input_sort %>% filter(Query %in% vertex$vertices & Target %in% vertex$vertices)
+# Decompose edges in components
+graph_input <- graph_from_data_frame(edges_input_df, directed = FALSE, vertices = vertex)
+graph_decomposed <- igraph::decompose(graph_input, mode = c("weak", "strong"), max.comps = NA,
+                                    min.vertices = 1)
+```
+
+Using igraph object, we select component containing the "656 special ASVs"
+```{r subset component which contains ASVs_656_str, echo=TRUE}
+graph_components <- as.data.frame(igraph::components(graph_input)$membership)
+cluster_656 <- unique(graph_components[ASVs_656_str,])
+#graph_decomposed <- graph_decomposed[cluster_656]
+```
+
+We finally prepare the graph for plot by normalizing each node feature
+
+```{r prepare graph (correct and homogeneize node features), echo=TRUE}
+subs_df <- data.frame(
+  from = c("TSAR;","Obazoa;","Opisthokonta;","Sagenista;","Labyrinthulidia","Opisthokonta_X;","Straminipila","Fungi_X","Fungi_XX",
+           "Eukaryota_X","Rozellomycota_X","Eukaryota;Rhizaria;Cercozoa;Thecofilosea","Stramenopiles;Bacillariophyta"),
+  to   = c("","","","","Bigyra","","Stramenopiles","NA","NA","NA","NA","Eukaryota;Rhizaria;Cercozoa;Filosa-Thecofilosea","Stramenopiles;Gyrista;Bacillariophyceae")
+)
+#
+graph_list <- lapply(seq_along(graph_decomposed), function(i) {
+  g <- as_tbl_graph(graph_decomposed[[i]])
+  names0 <- as.character(V(g)$Taxo)
+  patterns <- as.character(subs_df$from)
+  replacements <- as.character(subs_df$to)
+  #
+  V(g)$CC <- i
+  V(g)$Type <- sub("_.*","",V(g)$name)
+  #
+  newnames <- Reduce(
+    function(x, j) sub(patterns[j], replacements[j], x),
+    seq_along(patterns),
+    init = names0
+  )
+  #
+  V(g)$rTaxo <- newnames
+  #
+  V(g)$rTaxo <- gsub(" ","",V(g)$rTaxo)
+  V(g)$rTaxo <- sapply(strsplit(V(g)$rTaxo, ";"), function(x) paste0(head(x, 3), collapse = ";"))
+  V(g)$sTaxo <- sapply(strsplit(V(g)$rTaxo, ";"), function(x) paste0(head(x, 2), collapse = ";"))
+  if ("LR" %in% unique(V(g)$Type) & i %in% cluster_656) {
+    g
+  }
+})
+graph_list <- graph_list[!sapply(graph_list, is.null)]
+graph_ix <- do.call(tidygraph::bind_graphs, graph_list)
+#
+q <- as_tibble(graph_ix, active = "nodes")
+print("Unique taxonomic affiliation within CCs")
+sort(unique(q$rTaxo))
+OTUs_of_interest <- q %>% filter(Type=="LR") %>% select(name)
+OTUs_of_interest$name <- sub(".*_","", OTUs_of_interest$name)
+write.table(OTUs_of_interest,file="result/subset_CCs_thio_list.txt",col.names = FALSE, row.names = FALSE,quote = FALSE)
+```
+
+```{r plot, echo=TRUE, fig.height=10, fig.width=18}
+# Layout
+graph_ix_lay <- create_layout(graph_ix, layout = "fr")
+graph_ix_lay$is656 <- ifelse(graph_ix_lay$name %in% ASVs_656_str,"Yes","No")
+# Compute component centers (average positions)
+comp_centers <- graph_ix_lay %>%
+  as.data.frame() %>%
+  group_by(CC) %>%
+  summarise(x = mean(x), y = mean(y), I= sum(I[Type=="SR"]))
+# Plot
+ggraph(graph_ix_lay) + 
+  geom_edge_link(aes(edge_colour=`ID%`)) + 
+  geom_node_point(aes(fill=rTaxo, color=Type, shape=is656, size = ifelse(I==0,0,log10(I)))) +
+  geom_text(data = comp_centers, aes(x = x, y = y, label = paste0("CC", CC, " n=",I)),
+            color = "black", size = 4, fontface = "bold", nudge_y = 1.5,nudge_x = 1) +
+  #geom_node_text(aes(label = ifelse(I>=1000,I,"")), colour = 'black', nudge_x = 1, nudge_y = 1) + 
+  scale_fill_manual(values = c("#112b5c","#0a3c70","#00538d","#4d75a3","#7da2c2","lightblue",
+                               "#872720","#b13027",
+                               "#4b471d","#616626","#84812d",
+                               "#942450","#b13161","#c55273","#df7f87",#"#e7aea9",
+                               "black",
+                               "white",
+                               "#ffda1c",
+                               "#424242","darkgrey",
+                               "#ee7620","#E69F00")) +
+  scale_shape_manual(values = c(21,22)) + 
+  scale_edge_colour_gradient(high = "black" ,low = "#d9d9d9") +
+  scale_color_manual(values = c("yellow","black")) + 
+  scale_size_continuous(breaks = c(0,1,2,3,4), labels = c("0","10","100","1000","10000")) +
+  #scale_size_manual(values = c(3, 5)) + #facet_nodes(.~CC, scales = "free",ncol = 4) + 
+  labs(title="Graph of the LRs and SRs CCs",fill="Taxonomy (fill)", shape = "Included among the 656 un. Fungal ASVs (shape)", size = "Abundance in Sedimentary unit I (size)", color = "Technology (color)") + 
+  guides(fill = guide_legend(ncol=2,override.aes = list(shape = 21, size = 4)), color = guide_legend(override.aes = list(shape = 21, size = 4, fill = "grey")),
+         size = guide_legend(override.aes = list(shape = 21)), shape = guide_legend(override.aes = list(size = 4))) + 
+  theme_unique_art_graph()
+ggsave(filename = "Outputs/LongReads_analysis/cluster_3_97level_V2.pdf",width=18,height=10)
+```
