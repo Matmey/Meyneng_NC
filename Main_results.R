@@ -49,9 +49,6 @@ library(readr)
 library(partykit) 
 library(metagMisc)
 library(tseries)
-library(ComplexHeatmap)
-library(circlize)
-library(tibble)
 library(rio)
 library(lme4)
 library(sjPlot)
@@ -63,13 +60,14 @@ theme_set(theme_pubr(base_size = 10))
 ##########################
 # 1. Data import #########
 ##########################
-setwd("~/Boulot/Publication/In prep Meyneng et al. - Paleo Thio/github")
+setwd(".")
+if (dir.exists("Outputs/") == FALSE) {system("mkdir -p Outputs/")}
 
-asv_tax_df <- read.table("ASV_tax_table.tsv", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
-metadata_df <- read.csv("sample_metadata.csv", header = TRUE, sep = ";", stringsAsFactors = FALSE)
-env_df <- read.csv("data_env.csv", header = TRUE, dec = ",", sep = ";", stringsAsFactors = FALSE)
-foram_df <- read.csv("Foram_table.csv", header = TRUE, sep = ";", stringsAsFactors = FALSE)
-rs_db_df <- read.csv("database_RestSt.csv", header = TRUE, sep = ";", stringsAsFactors = FALSE)
+asv_tax_df <- read.table("rawdata/ASV_tax_table.tsv", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+metadata_df <- read.csv("rawdata/sample_metadata.csv", header = TRUE, sep = ";", stringsAsFactors = FALSE)
+env_df <- read.csv("rawdata/data_env.csv", header = TRUE, dec = ",", sep = ";", stringsAsFactors = FALSE)
+foram_df <- read.csv("rawdata/Foram_table.csv", header = TRUE, sep = ";", stringsAsFactors = FALSE)
+rs_db_df <- read.csv("rawdata/database_RestSt.csv", header = TRUE, sep = ";", stringsAsFactors = FALSE)
 
 ##########################
 # 2. Build phyloseq ######
