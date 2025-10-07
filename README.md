@@ -1,6 +1,6 @@
 # **Coastal ecosystem degradation driven by decades of unregulated terrestrial mining**
 
-**This is a workflow to reproduce analysis conduced in Meyneng et al. (2025).**
+**This is a workflow to reproduce analysis conducted in Meyneng et al. *(Submitted in 2025)*.**
 
 *Note that every figures have been finalised using a graphic software (AffinityDesigner) for visualisation details.*
 
@@ -24,7 +24,16 @@ For this study these sequences has been processed using SAMBA v4 available here:
 
 Amplicon sequencing targeting ITS rDNA were performed by the sequencing platform of Tartu University and processed by NextITS pipeline (https://github.com/vmikk/NextITS.git). Raw sequencing data are available on demand (vladimir.mikryukov@ut.ee).
 
+### Directory organisation
 
+rawdata/ - Contains all raw data required for the analyses.
+
+Main_results.r - R script for all main analyses and figure generation.
+
+LongRead_analysis.Rmd - R script for network analysis of long-read data.
+
+
+    
 
 
 

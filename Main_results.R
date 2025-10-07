@@ -1,24 +1,3 @@
-#####################################################################
-# README
-#####################################################################
-
-This script reproduces all main and supplementary figures used for our article entitled "Coastal ecosystem degradation driven by decades of unregulated terrestrial mining" submitted to Nature ecology and Evolution in 2025.
-
-Amplicon sequencing targeting 18S-V4 rDNA come from ECOMINE project (https://www.cresica.nc/projet/ecomine) and are available as raw sequence (https://doi.org/10.12770/62cde5b9-1888-4b2c-b8a5-a490a696b078).
-For this study these sequences has been processed using SAMBA v4 available here: https://gitlab.ifremer.fr/bioinfo/workflows/samba 
-
-Data input
--------------
-The script expects input files in a directory called `resultat/`:
-- ASV_tax_table.tsv          (ASV count + taxonomy table)
-- sample_metadata.csv
-- data_env.csv           
-- Foram_table.csv            
-- database_RestSt.csv (resting stage reference database)
-
-Note that every figures have been finalised using a graphic software (AffinityDesigner) for visualisation details. 
-
-#####################################################################
 
 ##########################
 # 0. Packages & options ##

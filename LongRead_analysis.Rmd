@@ -78,7 +78,7 @@ otu_table_LR <- otu_table_LR %>% mutate(Taxo=paste("Eukaryota",Kingdom,Phylum,Cl
 ### IV.B. Short read data
 We import the OTUs table of SR dataset.
 ```{r otu_table_SR rdata version, echo=TRUE}
-phylo_rar <- readRDS("~/Desktop/Article/2025/Long Reads New_caledonia/Long_Reads_Fungi/rawdata/phylo_rar.rds")
+phylo_rar <- readRDS("rawdata/phylo_rar.rds")
 otu_table_SR_rar <- merge(phylo_rar@tax_table,phylo_rar@otu_table,by="row.names")
 otu_table_SR_rar[otu_table_SR_rar==""] <- NA
 otu_table_SR_rar <- otu_table_SR_rar %>% mutate(Row.names=paste0("SR_",Row.names)) %>% column_to_rownames("Row.names")
