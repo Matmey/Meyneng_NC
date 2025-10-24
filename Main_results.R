@@ -837,7 +837,4 @@ fig4_combined <- fig4__nickel + fig4_foram + fig4_genus + plot_layout(ncol = 3,n
 ggsave(filename = "Outputs/Figure4_genus.pdf", plot = fig4_combined,
        width = 200, height = 300, units = "mm", dpi = 600)
 
-##########################
-# 11. Extended Data
-##########################
 
