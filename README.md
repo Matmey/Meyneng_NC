@@ -32,7 +32,7 @@ Main_results.r - R script for all main analyses and figure generation.
 
 LongRead_analysis.md - Bash script for analysis of long-read data.
 
-Process_LR_analysis_figure.Rmd - R script for network analysis of long read and short read (see http://github.com/Matmey/Meyneng_NC/Long-read_analysis.html)
+Process_LR_analysis_figure.Rmd - R script for network analysis of long read and short read.
 
 
     
