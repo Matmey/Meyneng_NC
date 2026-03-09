@@ -1,0 +1,143 @@
+---
+title: "Dataset cleaning"
+date: "2026-02-22"
+output: html_document
+---
+
+# Packages
+```{r, echo=FALSE}
+library(phyloseq)
+library(stringr)
+library(dplyr)
+library(tidyr)
+```
+
+# Data import
+```{r}
+asv_tax_df <- read.table("rawdata/ASV_tax_table.tsv", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
+metadata_df <- read.csv("rawdata/sample_metadata.csv", header = TRUE, sep = ";", stringsAsFactors = FALSE)
+env_df <- read.csv("rawdata/data_env.csv", header = TRUE, dec = ",", sep = ";", stringsAsFactors = FALSE)
+rs_db_df <- read.csv("rawdata/database_RestSt.csv", header = TRUE, sep = ";", stringsAsFactors = FALSE)
+```
+
+# Build phyloseq
+```{r}
+# Assume asv_tax_df has first column ASV_ID and following columns are samples until taxonomy column at the end, as output of SAMBA workflow.
+# Adjust if your file format differs.
+# Find taxonomy column by name or pattern
+tax_col_index <- grep("taxonomy", colnames(asv_tax_df), ignore.case = TRUE)
+if(length(tax_col_index) == 0) stop("taxonomy column not found in ASV_tax_table.tsv")
+
+# OTU table (count of reads)
+otu_df_raw <- asv_tax_df[, -tax_col_index]
+rownames(otu_df_raw) <- otu_df_raw[[1]]
+otu_df_raw <- otu_df_raw[ , -1]
+otu_mat <- as.matrix(otu_df_raw)
+OTU_TABLE <- otu_table(otu_mat, taxa_are_rows = TRUE)
+
+# Tax table
+tax_df_raw <- asv_tax_df[, c(1, tax_col_index)]
+colnames(tax_df_raw)[1] <- "ASV_ID"
+# Split taxonomy into levels: up to 9
+tax_split <- str_split_fixed(tax_df_raw[[2]], ";", 9)
+tax_tab <- data.frame(ASV_ID = tax_df_raw$ASV_ID,
+                      Domain = tax_split[,1],
+                      Supergroup = tax_split[,2],
+                      Division = tax_split[,3],
+                      Subdivision = tax_split[,4],
+                      Class = tax_split[,5],
+                      Order = tax_split[,6],
+                      Family = tax_split[,7],
+                      Genus = tax_split[,8],
+                      Species = tax_split[,9],
+                      stringsAsFactors = FALSE)
+rownames(tax_tab) <- tax_tab$ASV_ID
+TAX_TABLE <- tax_table(as.matrix(tax_tab[,-1]))
+
+# Sample data
+rownames(metadata_df) <- metadata_df$Sample_ID
+SAMPLE_DATA <- sample_data(metadata_df)
+
+# Raw phyloseq
+ps_raw <- phyloseq(OTU_TABLE, TAX_TABLE, SAMPLE_DATA)
+
+```
+
+# Blank filtering 
+```{r}
+# identify blank samples by a column in sample_data (Depth_sampling == "Blc") used in original script
+if("Depth_sampling" %in% colnames(sample_data(ps_raw))) {
+  blanks_ps <- subset_samples(ps_raw, Depth_sampling == "Blc")
+  blanks_ps <- prune_taxa(taxa_sums(blanks_ps) > 0, blanks_ps)
+  asvs_in_blanks <- taxa_names(blanks_ps)
+} else {
+  asvs_in_blanks <- character(0)
+}
+
+# Appendix 1: all ASV present in blanks
+write.csv(as.data.frame(tax_table(blanks_ps)),"Outputs/Appendix1_ASV_blanks.csv")
+
+```
+
+# Prepare analysis phyloseq objects
+- ps_alpha: remove singletons/doubletons, remove blank ASVs, keep Eukaryota and filter off multicellular taxa
+- ps_rarefied: same with rarefaction at 40,000 reads for comparative composition analyses (relative abundance)
+
+```{r}
+# ps_alpha
+ps_alpha <- prune_taxa(taxa_sums(ps_raw) > 2, ps_raw) 
+
+if(length(asvs_in_blanks) > 0) ps_alpha <- prune_taxa(!(taxa_names(ps_alpha) %in% asvs_in_blanks), ps_alpha)
+
+ps_alpha <- subset_taxa(ps_alpha,
+                        Domain == "Eukaryota" &
+                          Subdivision != " Metazoa" &
+                          Division != " Streptophyta" &
+                          Class != " Ulvophyceae" )
+ps_alpha <- subset_taxa(ps_alpha,
+                        Class != " Florideophyceae" &
+                          Genus != " Sargassum")
+ps_alpha <- prune_samples(sample_sums(ps_alpha) > 0, ps_alpha)
+
+# ps_rarefied
+set.seed(12345)
+
+ps_rarefied <- rarefy_even_depth(ps_raw, sample.size = 40000, trimOTUs = TRUE, replace = FALSE, rngseed = 12345)
+
+if(length(asvs_in_blanks) > 0) ps_rarefied <- prune_taxa(!(taxa_names(ps_rarefied) %in% asvs_in_blanks), ps_rarefied)
+
+ps_rarefied <- subset_taxa(ps_rarefied,
+                           Domain == "Eukaryota" &
+                             Subdivision != " Metazoa" &
+                             Division != " Streptophyta" &
+                             Class != " Ulvophyceae")
+ps_rarefied <- subset_taxa(ps_rarefied,
+                           Class != " Florideophyceae" &
+                             Genus != " Sargassum")
+ps_rarefied <- prune_samples(sample_sums(ps_rarefied) > 0, ps_rarefied)
+
+# Save processed phyloseq objects
+saveRDS(ps_alpha, file = "metaB_clean/ps_alpha.rds")
+saveRDS(ps_rarefied, file = "metaB_clean/ps_rarefied.rds")
+
+```
+
+# Resting-stage subsets
+```{r}
+rs_asvs <- rs_db_df %>% filter(RestingStage == 1) %>% pull(1)
+
+rs_asvs <- rs_asvs[!is.na(rs_asvs) & rs_asvs != ""]
+
+ps_rs_rarefied <- prune_taxa(taxa_names(ps_rarefied) %in% rs_asvs, ps_rarefied)
+
+saveRDS(ps_rs_rarefied, "metaB_clean/ps_rs_rarefied.rds")
+```
+
+# Summary
+```{r}
+ps_alpha
+ps_rarefied
+ps_rs_rarefied
+
+```
+

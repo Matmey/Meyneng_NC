@@ -28,11 +28,17 @@ Amplicon sequencing targeting ITS rDNA were performed by the sequencing platform
 
 rawdata/ - Contains all raw data required for the analyses.
 
-Main_results.r - R script for all main analyses and figure generation.
+metaB_clean/ - Filtered metabarcoding data in phyloseq object 
 
-LongRead_analysis.md - Bash script for analysis of long-read data.
+Outputs/ - Generated figures and tables
 
-Process_LR_analysis_figure.Rmd - R script for network analysis of long read and short read.
+[dataset_cleaning.Rmd - R script to filter raw data](https://matmey.github.io/Meyneng_NC/dataset_cleaning.html)
+
+[Main_results.Rmd - R script for all main analyses and figure generation.](https://matmey.github.io/Meyneng_NC/Main_results.html)
+
+[Long-Read_analysis.md - Bash script for analysis of long-read data.](https://matmey.github.io/Meyneng_NC/Long-Read_analysis.html)
+
+[Process_LR_analysis_figure.Rmd - R script for network analysis of long read and short read.](https://matmey.github.io/Meyneng_NC/Process_LR_analysis_figure.html)
 
 
     

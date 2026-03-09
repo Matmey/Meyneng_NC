@@ -1,15 +1,12 @@
+---
+title: "Main Results"
+author: "Mathisse Meyneng"
+date: "2026-02-22"
+output: html_document
+---
 
-##########################
-# 0. Packages & options ##
-##########################
-# Install missing packages if needed (uncomment)
-# required_pkgs <- c("phyloseq","stringr","dplyr","tidyr","ggplot2","patchwork",
-#                    "ggpubr","forcats","vegan","ade4","adespatial","ComplexHeatmap",
-#                    "circlize","metagMisc","lme4","sjPlot","tibble","rio","ggridges",
-#                    "ggparty","partykit","magrittr","readr")
-# missing <- setdiff(required_pkgs, rownames(installed.packages()))
-# if(length(missing)) install.packages(missing)
-
+# Packages
+```{r, echo=FALSE}
 library(phyloseq)
 library(stringr)
 library(dplyr)
@@ -32,138 +29,157 @@ library(rio)
 library(lme4)
 library(sjPlot)
 library(ggridges)
+library(FactoMineR)
+library(ggside)
+library(factoextra)
+library(corrplot)
+library(metagMisc)
+library(microbiome)
+library(rdacca.hp)
+library(UpSetVP)
 
-options(stringsAsFactors = FALSE)
-theme_set(theme_pubr(base_size = 10))
+```
 
-##########################
-# 1. Data import #########
-##########################
-setwd(".")
-if (dir.exists("Outputs/") == FALSE) {system("mkdir -p Outputs/")}
-
-asv_tax_df <- read.table("rawdata/ASV_tax_table.tsv", header = TRUE, sep = "\t", stringsAsFactors = FALSE)
-metadata_df <- read.csv("rawdata/sample_metadata.csv", header = TRUE, sep = ";", stringsAsFactors = FALSE)
+# Import data
+```{r}
 env_df <- read.csv("rawdata/data_env.csv", header = TRUE, dec = ",", sep = ";", stringsAsFactors = FALSE)
 foram_df <- read.csv("rawdata/Foram_table.csv", header = TRUE, sep = ";", stringsAsFactors = FALSE)
+ps_alpha <- readRDS("metaB_clean/ps_alpha.rds")
+ps_rarefied <- readRDS("metaB_clean/ps_rarefied.rds")
+ps_rs_rarefied <- readRDS("metaB_clean/ps_rs_rarefied.rds")
 rs_db_df <- read.csv("rawdata/database_RestSt.csv", header = TRUE, sep = ";", stringsAsFactors = FALSE)
 
-##########################
-# 2. Build phyloseq ######
-##########################
+```
 
-# Assume asv_tax_df has first column ASV_ID and following columns are samples until taxonomy column at the end, as output of SAMBA workflow.
-# Adjust if your file format differs.
-# Find taxonomy column by name or pattern
-tax_col_index <- grep("taxonomy", colnames(asv_tax_df), ignore.case = TRUE)
-if(length(tax_col_index) == 0) stop("taxonomy column not found in ASV_tax_table.tsv")
+#Al and Ni as representative metals of ultramafic and vulcanosedimentary sources
+As highlighted by PMF 5.0 model (see method ans supplementary information)
+```{r}
+metaux <- c("Li","Al","V","Cr","Mn","Fe","Co","Ni","Cu","Zn","As","Mo","Ag","Cd","Sn","Sb","Ba","Pb","U","Hg")
 
-# OTU table (counts)
-otu_df_raw <- asv_tax_df[, -tax_col_index]
-rownames(otu_df_raw) <- otu_df_raw[[1]]
-otu_df_raw <- otu_df_raw[ , -1]
-otu_mat <- as.matrix(otu_df_raw)
-OTU_TABLE <- otu_table(otu_mat, taxa_are_rows = TRUE)
+env_metaux <- env_df %>%
+  select(all_of(metaux))
 
-# TAX table
-tax_df_raw <- asv_tax_df[, c(1, tax_col_index)]
-colnames(tax_df_raw)[1] <- "ASV_ID"
-# Split taxonomy into levels: up to 9
-tax_split <- str_split_fixed(tax_df_raw[[2]], ";", 9)
-tax_tab <- data.frame(ASV_ID = tax_df_raw$ASV_ID,
-                      Domain = tax_split[,1],
-                      Supergroup = tax_split[,2],
-                      Division = tax_split[,3],
-                      Subdivision = tax_split[,4],
-                      Class = tax_split[,5],
-                      Order = tax_split[,6],
-                      Family = tax_split[,7],
-                      Genus = tax_split[,8],
-                      Species = tax_split[,9],
-                      stringsAsFactors = FALSE)
-rownames(tax_tab) <- tax_tab$ASV_ID
-TAX_TABLE <- tax_table(as.matrix(tax_tab[,-1]))
+env_metaux_nonzero <- env_metaux %>%
+  filter(rowSums(., na.rm = TRUE) > 0)
 
-# Sample data
-rownames(metadata_df) <- metadata_df$Sample_ID
-SAMPLE_DATA <- sample_data(metadata_df)
+mcor_metaux <- cor(env_metaux_nonzero,
+                   method = "spearman",
+                   use = "complete.obs")
 
-# Raw phyloseq
-ps_raw <- phyloseq(OTU_TABLE, TAX_TABLE, SAMPLE_DATA)
-
-##########################
-# 3. Blank filtering #####
-##########################
-
-# identify blank samples by a column in sample_data (Depth_sampling == "Blc") used in original script
-if("Depth_sampling" %in% colnames(sample_data(ps_raw))) {
-  blanks_ps <- subset_samples(ps_raw, Depth_sampling == "Blc")
-  blanks_ps <- prune_taxa(taxa_sums(blanks_ps) > 0, blanks_ps)
-  asvs_in_blanks <- taxa_names(blanks_ps)
-} else {
-  asvs_in_blanks <- character(0)
-  message("Warning: Depth_sampling column not present; skipping blank detection.")
+cor_mtest <- function(mat, method = "spearman") {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      test <- cor.test(mat[, i], mat[, j], method = method)
+      p.mat[i, j] <- p.mat[j, i] <- test$p.value
+    }
+  }
+  
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  return(p.mat)
 }
 
-##########################
-# 4. Prepare analysis phyloseq objects
-##########################
+p_mat_metaux <- cor_mtest(env_metaux_nonzero,
+                          method = "spearman")
 
-# 6.1 physeq_alpha: remove singletons/doubletons, remove blank ASVs, keep Eukaryota and filter off multicellular taxa
-ps_alpha <- prune_taxa(taxa_sums(ps_raw) > 2, ps_raw)   # remove singletons & doubletons
-if(length(asvs_in_blanks) > 0) ps_alpha <- prune_taxa(!(taxa_names(ps_alpha) %in% asvs_in_blanks), ps_alpha)
+col_palette <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF",
+                                  "#77AADD", "#4477AA"))
 
-# Apply taxonomy filters (adjust exact strings/spaces if necessary)
-ps_alpha <- subset_taxa(ps_alpha,
-                        Domain == "Eukaryota" &
-                          Subdivision != " Metazoa" &
-                          Division != " Streptophyta" &
-                          Class != " Ulvophyceae" )
-ps_alpha <- subset_taxa(ps_alpha,
-                        Class != " Florideophyceae" &
-                          Genus != " Sargassum")
-ps_alpha <- prune_samples(sample_sums(ps_alpha) > 0, ps_alpha)
+corrplot(mcor_metaux,
+         method = "color",
+         col = col_palette(200),
+         type = "upper",
+         order = "hclust",
+         addCoef.col = "black",
+         tl.col = "black",
+         tl.srt = 45,
+         p.mat = p_mat_metaux,
+         sig.level = 0.05,
+         insig = "blank",
+         diag = FALSE,
+         number.cex = 0.65)
+```
 
-# 6.2 physeq_rarefied: rarefy for comparative composition analyses
-set.seed(12345)
-# Define a reasonable sample.size: choose the minimum sample sum above zero, or use a fixed value (e.g. 40000) if available
-ps_rarefied <- rarefy_even_depth(ps_raw, sample.size = 40000, trimOTUs = TRUE, replace = FALSE, rngseed = 12345)
-if(length(asvs_in_blanks) > 0) ps_rarefied <- prune_taxa(!(taxa_names(ps_rarefied) %in% asvs_in_blanks), ps_rarefied)
-ps_rarefied <- subset_taxa(ps_rarefied,
-                           Domain == "Eukaryota" &
-                             Subdivision != " Metazoa" &
-                             Division != " Streptophyta" &
-                             Class != " Ulvophyceae")
-ps_rarefied <- subset_taxa(ps_rarefied,
-                           Class != " Florideophyceae" &
-                             Genus != " Sargassum")
-ps_rarefied <- prune_samples(sample_sums(ps_rarefied) > 0, ps_rarefied)
+```{r}
+#PCA
+Col_unit <- c("#782208","#DC7242","#FBCE64","#94BB67","#3D785F")
 
-# Save processed phyloseq objects if needed
-#saveRDS(ps_alpha, file = "ps_alpha.rds")
-#saveRDS(ps_rarefied, file = "ps_rarefied.rds")
+df_metaux_pca <- env_df %>%
+  select(Unite, all_of(metaux)) %>%
+  na.omit()
 
-##########################
-# 5. Resting-stage subsets#
-##########################
-rs_asvs <- rs_db_df %>% filter(RestingStage == 1) %>% pull(1)
-# rs_db may contain header row or an initial NA; remove NA and ensure ASV IDs match taxa names
-rs_asvs <- rs_asvs[!is.na(rs_asvs) & rs_asvs != ""]
+res_pca_all <- PCA(df_metaux_pca[, metaux], scale.unit = TRUE, graph = FALSE)
 
-ps_rs_alpha <- prune_taxa(taxa_names(ps_alpha) %in% rs_asvs, ps_alpha)
-ps_rs_rarefied <- prune_taxa(taxa_names(ps_rarefied) %in% rs_asvs, ps_rarefied)
+# Extraire les scores des individus
+scores_all <- as.data.frame(res_pca_all$ind$coord)
+scores_all$Unite <- df_metaux_pca$Unite
+perc_var_comp1 <- res_pca_all$eig[1,2]
+perc_var_comp2 <- res_pca_all$eig[2,2]
 
-#saveRDS(ps_rs_rarefied, "ps_rs_rarefied.rds")
+# Plot avec ggplot, avec ellipses pour chaque unité
+pca_all_plot <- ggplot(scores_all, aes(x = Dim.1, y = Dim.2, color = Unite, fill = Unite)) +
+  geom_point(size = 3) +
+  #stat_ellipse(alpha = 0.2, geom = "polygon") +
+  geom_ysidedensity(aes(y=Dim.2, yfill = Unite), alpha = 0.4) +
+  geom_xsidedensity(aes(x=Dim.1, xfill = Unite), alpha = 0.4) +
+  labs(x = paste("PC1 -",round(perc_var_comp1,1),"%"), 
+       y = paste("PC2 -",round(perc_var_comp2,1),"%"), 
+       color = "Unit", fill = "Unit") +
+   theme_classic() + 
+  theme(ggside.panel.scale = .2) +
+  theme_ggside_void() +
+  scale_color_manual(values =  Col_unit)+
+  scale_fill_manual(values =  Col_unit)+
+  scale_xfill_manual(values = Col_unit)+
+  scale_yfill_manual(values = Col_unit)
 
-##########################
-# 6. Identification of sedimentary units
-##########################
+#Keeping only An and Ni
+df_al_ni <- env_df %>%
+  select(Unite, Al, Ni) %>%
+  na.omit()
+
+res_pca_alni <- PCA(df_al_ni[, c("Al","Ni")], scale.unit = TRUE, graph = FALSE)
+
+scores_al_ni <- as.data.frame(res_pca_alni$ind$coord)
+scores_al_ni$Unite <- df_al_ni$Unite
+perc_var_alni_comp1 <- res_pca_alni$eig[1,2]
+perc_var_alni_comp2 <- res_pca_alni$eig[2,2]
+
+pca_alni_plot <- ggplot(scores_al_ni, aes(x = -Dim.1, y = Dim.2, color = Unite, fill = Unite)) +
+  geom_point(size = 3) +
+  #stat_ellipse(alpha = 0.2, geom = "polygon") +
+  geom_ysidedensity(aes(y=Dim.2, yfill = Unite,), alpha = 0.4) +
+  geom_xsidedensity(aes(x=-Dim.1, xfill = Unite), alpha = 0.4) +
+  labs(x = paste("PC1 -",round(perc_var_alni_comp1,1),"%"), 
+       y = paste("PC2 -",round(perc_var_alni_comp2,1),"%"), 
+       color = "Unit", fill = "Unit") +
+   theme_classic() + 
+  theme(ggside.panel.scale = .2) +
+  theme_ggside_void() +
+  scale_color_manual(values =  Col_unit)+
+  scale_fill_manual(values =  Col_unit)+
+  scale_xfill_manual(values = Col_unit)+
+  scale_yfill_manual(values = Col_unit)
+
+combined_plot <- pca_all_plot + pca_alni_plot + 
+  plot_layout(guides = "collect") & theme(legend.position = "bottom")
+
+combined_plot
+
+ggsave("Outputs/Figure_suppl_double_PCA_metals.pdf", plot = combined_plot,
+       width = 200, height = 100, units = "mm", dpi = 400)
+
+```
+
+# Identification of sedimentary units based on these two metals
+```{r}
 # Select relevant environmental variables 
 env_subset <- env_df %>%
-  select(
-    Codification, Depth,
-    Ni, Al
-  )
+  select(Codification, Depth, Ni, Al)
 
 #  Filter out rows with no sediment or metal data
 env_subset <- env_subset %>%
@@ -172,7 +188,7 @@ env_subset <- env_subset %>%
   select(-env_sum)
 
 env_subset <- env_subset %>%
-  mutate(Depth_neg = -Depth)   # easier for plotting or modeling
+  mutate(Depth_neg = -Depth)  
 
 #  Conditional Inference Tree (ctree)
 # Model depth partitioning based on Ni and Al concentration
@@ -196,9 +212,11 @@ env_subset_IV <- env_subset %>%
 
 print(env_subset_IV)
 
-##########################
-# 7. Figure 1: Environmental changes along core
-##########################
+```
+
+# Environmental changes along core
+Sharp changes in chemical and physical parameters
+```{r}
 # Prepare long format for selected variables
 env_vars <- c("Clay","Sand","Ni","Al")
 env_long <- env_df %>%
@@ -218,9 +236,9 @@ env_long$Variable <- factor(env_long$Variable, levels = c("Ni","Al","Clay","Sand
 color_variable <- c("#FF794D","#59BDC0","#BB593E","#D9AB37")
 
 fig1_env_profile <- ggplot(env_long, aes(x = Depth_neg, y = Value, color = Variable, fill = Variable)) +
-  geom_vline(xintercept = c(-46, -94, -138, -202), linetype = "dashed", color = "grey") + #sedimentary units established by ctree function (see extended data 1)
+  geom_vline(xintercept = c(-46, -94, -138, -202), linetype = "dashed", color = "grey") + #sedimentary units
   facet_grid(~Category, scales = "free", space = "free_y") +
-  geom_line(aes(group = Variable), size = 0.8, alpha = 0.6) +
+  geom_line(aes(group = Variable), linewidth = 0.8, alpha = 0.6) +
   geom_point(size = 1) +
   scale_fill_manual(values = color_variable) + scale_color_manual(values = color_variable) +
   labs(x = "Depth (cm)", y = "Value") + coord_flip() +
@@ -241,78 +259,121 @@ fig1_source <- ggplot(source_long, aes(x = Depth_neg, y = Value, fill = Source))
   theme(axis.title.y = element_blank(), axis.text.y = element_blank(), axis.ticks.y = element_blank())
 
 fig1_combined <- fig1_env_profile + fig1_source + plot_layout(widths = c(3,1))
+fig1_combined
+
 ggsave("Outputs/Figure1_environment_profiles.pdf", plot = fig1_combined,
        width = 180, height = 140, units = "mm", dpi = 600)
 
-##########################
-# 8. Figure 2: Alpha diversity (foraminiferal genera + ASV)
-##########################
+```
 
-# --- Foraminifera summary by sedimentary units 
-foram_df$Unit <- factor(foram_df$Unit, levels = c("V","IV","III","II","I"))
+# Diversity patterns corrected by sedimentation rates 
+```{r}
+# Foraminifera
+foram_df <- foram_df %>%
+  mutate(
+    Sed_rate = case_when(
+      Unit == "I"   ~ 0.9,
+      Unit == "II"  ~ 1.0,
+      Unit == "III" ~ 0.2,
+      Unit == "IV"  ~ 0.2,
+      Unit == "V"   ~ 0.1,
+      TRUE ~ NA_real_
+    )
+  )
 
-foram_summary <- foram_df %>%
+# log-transform
+foram_df2 <- foram_df %>%
+  filter(!is.na(Sum_genus), !is.na(Sed_rate)) %>%
+  mutate(
+    log_div = log(Sum_genus + 1),
+    log_sed = log(Sed_rate)
+  )
+
+# Modele : diversity ~ sedimentation rate
+mod_foram <- lm(log_div ~ log_sed, data = foram_df2)
+summary(mod_foram)
+
+# Corrected diversity = residual
+foram_df2$div_corr <- resid(mod_foram)
+
+summary_foram_df2 <- foram_df2 %>%
   group_by(Unit) %>%
-  summarise(mean_genus = mean(Sum_genus, na.rm = TRUE),
-            sd_genus = sd(Sum_genus, na.rm = TRUE),
+  summarise(mean_div_corr = mean(div_corr, na.rm = TRUE),
+            sd_div_corr = sd(div_corr, na.rm = TRUE),
             min_date = min(date_median, na.rm = TRUE),
             max_date = max(date_median, na.rm = TRUE)) %>%
   mutate(med_date = (min_date + max_date)/2) %>% ungroup()
 
-# Wilcoxon pairwise comparisons (successive parts)
-pairwise_wilcox_foram <- list(
-  V_vs_IV = wilcox.test(Sum_genus ~ Unit, data = subset(foram_df, Unit %in% c("V","IV"))),
-  IV_vs_III = wilcox.test(Sum_genus ~ Unit, data = subset(foram_df, Unit %in% c("IV","III"))),
-  III_vs_II = wilcox.test(Sum_genus ~ Unit, data = subset(foram_df, Unit %in% c("III","II"))),
-  II_vs_I = wilcox.test(Sum_genus ~ Unit, data = subset(foram_df, Unit %in% c("II","I")))
-)
+summary_foram_df2
 
-# Foraminifera plot
-fig2_foram_plot <- ggplot(foram_df, aes(y = Sum_genus, x = date_median)) +
+# Visualisation
+sed_rate_foram <- ggplot(foram_df2, aes(y = div_corr, x = date_median)) +
   geom_vline(xintercept = c(1976, 1960, 1757, 1301), linetype = "dashed", color = "grey") +
-  geom_ribbon(aes(ymin = 0, ymax = Sum_genus), alpha = 0.25) +
-  geom_point(data = foram_summary, aes(x = med_date, y = mean_genus), inherit.aes = FALSE, size = 2) +
-  geom_line(data = foram_summary, aes(x = med_date, y = mean_genus), inherit.aes = FALSE, size = 0.8) +
-  geom_linerange(data = foram_summary, aes(x = med_date, ymin = mean_genus - sd_genus, ymax = mean_genus + sd_genus), inherit.aes = FALSE) +
-  labs(x = "Median date", y = "Genus number") + coord_flip() + theme_pubr(base_size = 9)
+  geom_ribbon(aes(ymin = 0, ymax = div_corr), alpha = 0.25) +
+  geom_point(data = summary_foram_df2, aes(x = med_date, y = mean_div_corr), inherit.aes = FALSE, size = 2) +
+  geom_line(data = summary_foram_df2, aes(x = med_date, y = mean_div_corr), inherit.aes = FALSE, size = 0.8) +
+  geom_linerange(data = summary_foram_df2, aes(x = med_date, ymin = mean_div_corr - sd_div_corr, ymax = mean_div_corr + sd_div_corr), inherit.aes = FALSE) +
+  labs(x = "Median date", y = "Corrected diversity") + xlim(1140,2030) +
+  theme_pubr(base_size = 12) + coord_flip()
 
-# --- Microeukaryote alpha (Observed ASVs) using ps_alpha
+# Microeukaryote
 alpha_richness_df <- estimate_richness(ps_alpha, measures = c("Observed"))
 alpha_richness_df$SampleID <- rownames(alpha_richness_df)
 # Merge with sample metadata (ensure columns exist)
 meta_alpha <- as.data.frame(sample_data(ps_alpha))
 meta_alpha$SampleID <- rownames(meta_alpha)
+meta_alpha <- as.matrix(meta_alpha)
+meta_alpha <- as.data.frame(meta_alpha)
 alpha_meta_df <- left_join(alpha_richness_df, meta_alpha, by = "SampleID")
 # Ensure numeric columns
-alpha_meta_df$Date_median <- as.numeric(alpha_meta_df$Date_median)
+alpha_meta_df$Date_mean <- as.numeric(alpha_meta_df$Date_mean)
 alpha_meta_df$Depth_reel <- as.numeric(alpha_meta_df$Depth_reel)
 alpha_meta_df$alpha_observed <- as.numeric(alpha_meta_df$Observed)
 
-alpha_summary_by_part <- alpha_meta_df %>%
+alpha_meta_df <- alpha_meta_df %>%
+  mutate(
+    Sed_rate = case_when(
+      Unit == "I"   ~ 0.9,
+      Unit == "II"  ~ 1.0,
+      Unit == "III" ~ 0.2,
+      Unit == "IV"  ~ 0.2,
+      Unit == "V"   ~ 0.1,
+      TRUE ~ NA_real_
+    )
+  )
+
+alpha_df2 <- alpha_meta_df %>%
+  filter(!is.na(alpha_observed), !is.na(Sed_rate)) %>%
+  mutate(
+    log_div = log(alpha_observed + 1),
+    log_sed = log(Sed_rate)
+  )
+
+mod_alpha <- lm(log_div ~ log_sed, data = alpha_df2)
+summary(mod_alpha)
+
+alpha_df2$div_corr <- resid(mod_alpha)
+
+summary_alpha_df2 <- alpha_df2 %>%
   group_by(Unit) %>%
-  summarise(mean_alpha = mean(alpha_observed, na.rm = TRUE),
-            sd_alpha = sd(alpha_observed, na.rm = TRUE),
-            min_date = min(Date_median, na.rm = TRUE),
-            max_date = max(Date_median, na.rm = TRUE)) %>%
-  mutate(med_date = c(1999,1968,1858,1520,1221)) %>% ungroup()
+  summarise(mean_div_corr = mean(div_corr, na.rm = TRUE),
+            sd_div_corr = sd(div_corr, na.rm = TRUE),
+            min_date = min(Date_mean, na.rm = TRUE),
+            max_date = max(Date_mean, na.rm = TRUE)) %>%
+  mutate(med_date = (min_date + max_date)/2) %>% ungroup()
 
-# pairwise Wilcoxon for alpha
-pairwise_wilcox_alpha <- list(
-  V_vs_IV = wilcox.test(alpha_observed ~ Unit, data = subset(alpha_meta_df, Unit %in% c("V","IV"))),
-  IV_vs_III = wilcox.test(alpha_observed ~ Unit, data = subset(alpha_meta_df, Unit %in% c("IV","III"))),
-  III_vs_II = wilcox.test(alpha_observed ~ Unit, data = subset(alpha_meta_df, Unit %in% c("III","II"))),
-  II_vs_I = wilcox.test(alpha_observed ~ Unit, data = subset(alpha_meta_df, Unit %in% c("II","I")))
-)
+summary_alpha_df2
 
-fig2_alpha_plot <- ggplot(alpha_meta_df, aes(y = alpha_observed, x = Date_median)) +
+sed_rate_alpha <- ggplot(alpha_df2, aes(y = div_corr, x = Date_mean)) +
   geom_vline(xintercept = c(1976, 1960, 1757, 1301), linetype = "dashed", color = "grey") +
-  geom_ribbon(aes(ymin = 0, ymax = alpha_observed), alpha = 0.25) +
-  geom_point(data = alpha_summary_by_part, aes(x = med_date, y = mean_alpha), inherit.aes = FALSE, size = 2) +
-  geom_line(data = alpha_summary_by_part, aes(x = med_date, y = mean_alpha), inherit.aes = FALSE, size = 0.8) +
-  geom_linerange(data = alpha_summary_by_part, aes(x = med_date, ymin = mean_alpha - sd_alpha, ymax = mean_alpha + sd_alpha), inherit.aes = FALSE) +
-  labs(x = "Median date", y = "ASV number") + coord_flip() + theme_pubr(base_size = 9)
+  geom_ribbon(aes(ymin = 0, ymax = div_corr), alpha = 0.25) +
+  geom_point(data = summary_alpha_df2, aes(x = med_date, y = mean_div_corr), inherit.aes = FALSE, size = 2) +
+  geom_line(data = summary_alpha_df2, aes(x = med_date, y = mean_div_corr), inherit.aes = FALSE, size = 0.8) +
+  geom_linerange(data = summary_alpha_df2, aes(x = med_date, ymin = mean_div_corr - sd_div_corr, ymax = mean_div_corr + sd_div_corr), inherit.aes = FALSE) +
+  labs(x = "Median date", y = "Corrected diversity")+ xlim(1140,2030) +
+  theme_pubr(base_size = 12) + coord_flip() 
 
-# --- Podani partitioning (moving window) using ps_alpha abundance table
+# Podani partitioning (moving window) using ps_alpha abundance table
 otu_alpha_mat <- t(as.data.frame(otu_table(ps_alpha))) # samples as rows
 otu_alpha_mat <- otu_alpha_mat[order(rownames(otu_alpha_mat), decreasing = TRUE), ]
 
@@ -351,30 +412,164 @@ fig2_podani_plot <- ggplot(df_podani %>% filter(component %in% comp_plot), aes(x
   )
 
 # Combine Figure 2 panels
-fig2_combined <- fig2_foram_plot + fig2_alpha_plot + fig2_podani_plot + plot_layout(ncol = 3)
-ggsave(filename = "Outputs/Figure2_alpha_diversity.pdf", plot = fig2_combined,
-       width = 200, height = 120, units = "mm", dpi = 600)
+fig2_combined <- sed_rate_foram + sed_rate_alpha + fig2_podani_plot + plot_layout(ncol = 3)
+fig2_combined
 
-##########################
-# 9. Figure 3: Rarefied dataset - richness & composition
-##########################
-# Ensure ps_rarefied is present and filtered similarly (exclude multicellular)
-ps_rarefied_prot <- subset_taxa(ps_rarefied,
-                                Domain == "Eukaryota" &
-                                  Subdivision != " Metazoa" &
-                                  Division != " Streptophyta" &
-                                  Class != " Ulvophyceae")
-ps_rarefied_prot <- subset_taxa(ps_rarefied_prot,
-                                Class != " Florideophyceae" &
-                                  Genus != " Sargassum")
-ps_rarefied_prot <- prune_samples(sample_sums(ps_rarefied_prot) > 0, ps_rarefied_prot)
+ggsave(filename = "Outputs/Figure2_alpha_diversity.pdf", plot = fig2_combined,
+       width = 200, height = 180, units = "mm", dpi = 600)
+
+```
+#Link DNA concentration, diversity and grain size
+```{r}
+#DNA concentration profil
+alpha_meta_df$ADN <- as.numeric(alpha_meta_df$ADN)
+
+ggplot(alpha_meta_df, aes(x = -Depth_reel, y = ADN)) +
+  geom_point(size = 1) +
+  geom_vline(xintercept = c(-41,-93,-137,-202,-226), linetype = "dashed", color = "grey") +
+  #geom_line(size = 0.9, alpha = 0.6) +
+  scale_color_manual(values = Col_unit) +
+  coord_flip() + theme_pubr(base_size = 9) + 
+  labs(
+    x = "Depth (cm)",
+    y = expression("DNA concentration (ng L{^1})")
+  ) 
+```
+
+Compare with microeukaryote rarefied dataset
+```{r}
+# Microeukaryote
+alpha_richness_df <- estimate_richness(ps_rarefied, measures = c("Observed"))
+alpha_richness_df$SampleID <- rownames(alpha_richness_df)
+# Merge with sample metadata (ensure columns exist)
+meta_alpha <- as.data.frame(sample_data(ps_rarefied))
+meta_alpha$SampleID <- rownames(meta_alpha)
+meta_alpha <- as.matrix(meta_alpha)
+meta_alpha <- as.data.frame(meta_alpha)
+alpha_meta_df <- left_join(alpha_richness_df, meta_alpha, by = "SampleID")
+# Ensure numeric columns
+alpha_meta_df$Date_mean <- as.numeric(alpha_meta_df$Date_mean)
+alpha_meta_df$Depth_reel <- as.numeric(alpha_meta_df$Depth_reel)
+alpha_meta_df$alpha_observed <- as.numeric(alpha_meta_df$Observed)
+
+alpha_meta_df <- alpha_meta_df %>%
+  mutate(
+    Sed_rate = case_when(
+      Unit == "I"   ~ 0.9,
+      Unit == "II"  ~ 1.0,
+      Unit == "III" ~ 0.2,
+      Unit == "IV"  ~ 0.2,
+      Unit == "V"   ~ 0.1,
+      TRUE ~ NA_real_
+    )
+  )
+
+alpha_df2 <- alpha_meta_df %>%
+  filter(!is.na(alpha_observed), !is.na(Sed_rate)) %>%
+  mutate(
+    log_div = log(alpha_observed + 1),
+    log_sed = log(Sed_rate)
+  )
+
+mod_alpha <- lm(log_div ~ log_sed, data = alpha_df2)
+summary(mod_alpha)
+
+alpha_df2$div_corr <- resid(mod_alpha)
+
+summary_alpha_df2 <- alpha_df2 %>%
+  group_by(Unit) %>%
+  summarise(mean_div_corr = mean(div_corr, na.rm = TRUE),
+            sd_div_corr = sd(div_corr, na.rm = TRUE),
+            min_date = min(Date_mean, na.rm = TRUE),
+            max_date = max(Date_mean, na.rm = TRUE)) %>%
+  mutate(med_date = (min_date + max_date)/2) %>% ungroup()
+
+sed_rate_alpha <- ggplot(alpha_df2, aes(y = div_corr, x = Date_mean)) +
+  geom_vline(xintercept = c(1976, 1960, 1757), linetype = "dashed", color = "grey") +
+  geom_ribbon(aes(ymin = 0, ymax = div_corr), alpha = 0.25) +
+  geom_point(data = summary_alpha_df2, aes(x = med_date, y = mean_div_corr), inherit.aes = FALSE, size = 2) +
+  geom_line(data = summary_alpha_df2, aes(x = med_date, y = mean_div_corr), inherit.aes = FALSE, size = 0.8) +
+  geom_linerange(data = summary_alpha_df2, aes(x = med_date, ymin = mean_div_corr - sd_div_corr, ymax = mean_div_corr + sd_div_corr), inherit.aes = FALSE) +
+  labs(x = "Median date", y = "Corrected diversity") +
+  theme_pubr(base_size = 12) + coord_flip() 
+
+# Podani partitioning (moving window) using ps_alpha abundance table
+otu_alpha_mat <- t(as.data.frame(otu_table(ps_rarefied))) # samples as rows
+otu_alpha_mat <- otu_alpha_mat[order(rownames(otu_alpha_mat), decreasing = TRUE), ]
+
+window_size <- 2
+df_podani <- data.frame()
+for(i in 1:(nrow(otu_alpha_mat) - window_size)) {
+  tmp <- otu_alpha_mat[i:(i + window_size), ]
+  tmp_beta <- adespatial::beta.div.comp(tmp, coef = "J", quant = FALSE)
+  tmp_beta <- data.frame(start = rownames(tmp)[1], end = rownames(tmp)[nrow(tmp)], tmp_beta$part) %>%
+    tibble::rownames_to_column("component")
+  df_podani <- dplyr::bind_rows(df_podani, tmp_beta)
+}
+
+# Merge with depth
+df_podani<- df_podani %>%
+  mutate(period = paste(start, end, sep = "-")) %>%
+  mutate(Sample_ID = paste(end)) 
+
+sample_depth <- select(alpha_meta_df, "Sample_ID","Depth_sampling", "Unit")
+
+df_podani <- merge(df_podani, sample_depth, by = "Sample_ID")
+df_podani$Depth_sampling <- as.numeric(df_podani$Depth_sampling)
+
+# Plot data
+comp_plot <- c("BDtotal","Repl","RichDif")
+
+fig2_podani_plot <- ggplot(df_podani %>% filter(component %in% comp_plot), aes(x = -Depth_sampling, y = tmp_beta.part, color = component, fill = component)) +
+  geom_vline(xintercept = c(-41,-93,-137), linetype = "dashed", color = "grey") +
+  geom_line(size = 0.9, alpha = 0.6) +
+  scale_color_manual(values = c("#616161", "#72B678", "#407B7B")) +
+  geom_point(size = 1) +
+  coord_flip() + theme_pubr(base_size = 12) + 
+  labs(
+    x = "Depth (cm)",
+    y = "Podani's indices"
+  )
+
+fig2_rarefied_combined <- sed_rate_alpha + fig2_podani_plot
+fig2_rarefied_combined
+
+ggsave(filename = "Outputs/Fig2_rarefied.pdf", plot = fig2_combined,
+       width = 200, height = 180, units = "mm", dpi = 600)
+
+```
+
+```{r}
+# Pairwise Wilcoxon among units
+pairwise_result_asv <- pairwise.wilcox.test(
+  x = alpha_meta_df$alpha_observed,
+  g = alpha_meta_df$Unit,
+  p.adjust.method = "bonferroni")
+
+pval_asv <- as.data.frame(pairwise_result_asv$p.value)
+pval_asv$type <- "ASV"
+pval_asv
+
+pairwise_result_foram <- pairwise.wilcox.test(
+  x = foram_df$Sum_genus,
+  g = foram_df$Unit,
+  p.adjust.method = "bonferroni")
+
+pval_foram <- as.data.frame(pairwise_result_foram$p.value) 
+pval_foram$type <- "Foram" 
+pval_foram
+
+```
+
+# Composition of microeukaryote community 
+```{r}
 
 # Resting-stage and unknown-genus subsets (using rs_db_df)
 asv_rs_all <- rs_db_df %>% filter(RestingStage == 1) %>% pull(1) %>% na.omit() #based on functional database of Ramond et al., 2018 and additional literature when necessary
 asv_unk <- rs_db_df %>% filter(is.na(RestingStage) & Unk_genus == 1) %>% pull(1) %>% na.omit() # i.e., no genus assignment
 
-ps_rs_rar <- prune_taxa(taxa_names(ps_rarefied_prot) %in% asv_rs_all, ps_rarefied_prot)
-ps_rs_unk_rar <- prune_taxa(taxa_names(ps_rarefied_prot) %in% asv_unk, ps_rarefied_prot)
+ps_rs_rar <- prune_taxa(taxa_names(ps_rarefied) %in% asv_rs_all, ps_rarefied)
+ps_rs_unk_rar <- prune_taxa(taxa_names(ps_rarefied) %in% asv_unk, ps_rarefied)
 
 # Richness observed
 rich_rs <- estimate_richness(ps_rs_rar, measures = "Observed")
@@ -384,10 +579,10 @@ colnames(rich_rs)[1] <- "Observed_rs"
 reads_rs <- colSums(otu_table(ps_rs_rar))
 reads_rs_df <- data.frame(SampleID = names(reads_rs), TotalReads_rs = reads_rs, stringsAsFactors = FALSE)
 
-rich_tot <- estimate_richness(ps_rarefied_prot, measures = "Observed")
+rich_tot <- estimate_richness(ps_rarefied, measures = "Observed")
 rich_tot$SampleID <- rownames(rich_tot)
 colnames(rich_tot)[1] <- "Observed_tot"
-reads_tot <- colSums(otu_table(ps_rarefied_prot))
+reads_tot <- colSums(otu_table(ps_rarefied))
 reads_tot_df <- data.frame(SampleID = names(reads_tot), TotalReads_tot = reads_tot, stringsAsFactors = FALSE)
 
 rich_unk <- estimate_richness(ps_rs_unk_rar, measures = "Observed")
@@ -565,12 +760,265 @@ fig3_compo_rar_plot <- ggplot(complet_plot_df, aes(x = Abundance_per_Subdivision
   theme_minimal(base_size = 9) + labs(x = "Relative abundance (%)", y = "Depth") + theme(panel.grid = element_blank())
 
 fig3_combined <- fig3_obs_plot + fig3_read_plot + fig3_compo_rs_plot + fig3_compo_rar_plot + plot_layout(ncol = 4,nrow=1, heights = c(1,1,1,1))
+fig3_combined
+
 ggsave(filename = "Outputs/Figure3_rarefied_composition.pdf", plot = fig3_combined,
        width = 250, height = 200, units = "mm", dpi = 600)
 
-##########################
-# 10. Figure 4: Genus dynamics
-##########################
+```
+
+# Structure changes in each community
+```{r}
+#All aggregate at the genus level for homogeneity
+
+#microeukaryote community: ps_rarefied / ps_alpha
+ps_genus <- aggregate_taxa(ps_alpha, 'Genus')
+
+#resting stage subcommunity: ps_rs_rar
+physeq_rs <- prune_taxa(taxa_names(ps_alpha) %in% asv_rs_all, ps_alpha)
+physeq_rs_genus <- aggregate_taxa(physeq_rs, 'Genus')
+
+#foram: foram_df
+foram_df$Sample <- sub("_F$", "", foram_df$Sample)
+rownames(foram_df) <- foram_df$Sample
+foram_df[is.na(foram_df)] <- 0
+foram_sup0 <- foram_df %>%
+  filter(Sum_genus > 0) #remove 10 samples with 0 individual found
+foram <- foram_sup0[,c(9:33)]
+
+#Tous les ASVs
+microeuk_df <- t(as.data.frame(otu_table(ps_genus)))
+rs_df <- t(as.data.frame(otu_table(physeq_rs_genus)))
+
+microeuk_df <- ifelse(microeuk_df > 0, 1, 0)
+rs_df <- ifelse(rs_df > 0, 1, 0)
+
+mat_microeuk <- vegdist(microeuk_df, method = "jaccard")
+mat_rs <- vegdist(rs_df, method = "jaccard")
+mat_foram <- vegdist(foram, method = "jaccard")
+
+pcoa_microeuk <- wcmdscale(mat_microeuk, k=2, eig = TRUE)
+pcoa_rs <- wcmdscale(mat_rs, k=2, eig = TRUE)
+pcoa_foram <- wcmdscale(mat_foram, k=2, eig = TRUE)
+
+point_microeuk <- as.data.frame(pcoa_microeuk$points)
+point_rs <- as.data.frame(pcoa_rs$points)
+point_foram <- as.data.frame(pcoa_foram$points)
+
+point_microeuk$unit <- sample_data(ps_genus)$Part
+point_rs$unit <- sample_data(physeq_rs_genus)$Part
+point_foram$unit <- foram_sup0$Unit
+
+plot_microeuk <- ggplot(data = point_microeuk, aes(x = Dim1, y = Dim2, color = unit)) +
+  geom_point(size = 2) +
+  geom_ysidedensity(aes(y=Dim2, yfill = unit,), alpha = 0.4) +
+  geom_xsidedensity(aes(x=Dim1, xfill = unit), alpha = 0.4) +
+  scale_xfill_manual(values = Col_unit)+
+  scale_yfill_manual(values = Col_unit) +
+  scale_color_manual(values = Col_unit)+
+  xlab(paste(format((pcoa_microeuk$eig[1]*10), digit = 3),"%")) + 
+  ylab(paste(format((pcoa_microeuk$eig[2]*10), digit = 3),"%"))+
+  labs(title = "Microeukaryote community")+
+  theme_classic() + 
+  theme(ggside.panel.scale = .2) +
+  theme_ggside_void() 
+
+plot_rs <- ggplot(data = point_rs, aes(x = Dim1, y = Dim2, color = unit)) +
+  geom_point(size = 2) +
+  geom_ysidedensity(aes(y=Dim2, yfill = unit,), alpha = 0.4) +
+  geom_xsidedensity(aes(x=Dim1, xfill = unit), alpha = 0.4) +
+  scale_color_manual(values =  Col_unit)+
+  scale_xfill_manual(values = Col_unit)+
+  scale_yfill_manual(values = Col_unit) +
+  xlab(paste(format((pcoa_rs$eig[1]*10), digit = 3),"%")) + 
+  ylab(paste(format((pcoa_rs$eig[2]*10), digit = 3),"%"))+
+  labs(title = "Resting stage")+
+  theme_classic() + 
+  theme(ggside.panel.scale = .2) +
+  theme_ggside_void() 
+
+plot_foram <- ggplot(data = point_foram, aes(x = Dim1, y = Dim2, color = unit)) +
+  geom_point(size = 2) +
+  geom_ysidedensity(aes(y=Dim2, yfill = unit,), alpha = 0.4) +
+  geom_xsidedensity(aes(x=Dim1, xfill = unit), alpha = 0.4) +
+  scale_color_manual(values =  Col_unit)+
+  scale_xfill_manual(values = Col_unit)+
+  scale_yfill_manual(values = Col_unit) +
+  xlab(paste(format((pcoa_foram$eig[1]*10), digit = 3),"%")) + 
+  ylab(paste(format((pcoa_foram$eig[2]*10), digit = 3),"%"))+
+  labs(title = "Foraminifera")+
+  theme_classic() + 
+  theme(ggside.panel.scale = .2) +
+  theme_ggside_void() 
+
+combined_pcoa <- plot_microeuk + plot_rs + plot_foram + plot_layout(guides = "collect") & theme(legend.position = "bottom")
+combined_pcoa
+
+ggsave(filename = "Outputs/Figure4_pcoax3.pdf", plot = combined_pcoa,
+       width = 200, height = 85, units = "mm", dpi = 600)
+
+```
+# Influence of several group of parameters on this structure
+```{r}
+#First need interpolation to compare biological and environmental data at the same depth
+env <- env_df %>% mutate(across(c(UB, VS, Clay, Silt, Sand, Ni, Al, COP_perc, NT_perc), 
+                             ~as.numeric(gsub(",", ".", .))))
+
+variables_to_interpolate <- c("UB", "VS", "Ni", "Al", "COP_perc", "NT_perc", "Clay", "Silt", "Sand")
+
+env_long_status <- env %>%
+  pivot_longer(cols = all_of(variables_to_interpolate), names_to = "variable", values_to = "value") %>%
+  mutate(status = ifelse(is.na(value), "interpolated", "measured")) %>%
+  select(Codification, Depth, variable, status)
+
+interpolate_full_cm <- function(df, variables) {
+  
+  full_depth <- seq(min(df$Depth, na.rm = TRUE),
+                    max(df$Depth, na.rm = TRUE),
+                    by = 0.5)
+  
+  df_full <- data.frame(Depth = full_depth)
+  
+  for (var in variables) {
+    
+    interp_values <- approx(
+      x = df$Depth[!is.na(df[[var]])],
+      y = df[[var]][!is.na(df[[var]])],
+      xout = full_depth,
+      method = "linear",
+      rule = 2
+    )$y
+    
+    df_full[[var]] <- interp_values
+  }
+  
+  return(df_full)
+}
+
+df_interp <- interpolate_full_cm(env, variables_to_interpolate)
+
+#visual check
+env_measured_long <- env %>%
+  pivot_longer(cols = all_of(variables_to_interpolate),
+               names_to = "variable",
+               values_to = "measured_value") %>%
+  filter(!is.na(measured_value))
+
+
+df_long <- df_interp %>%
+  pivot_longer(cols = all_of(variables_to_interpolate),
+               names_to = "variable",
+               values_to = "value") %>%
+  left_join(env_measured_long,
+            by = c("Depth", "variable")) %>%
+  mutate(status = ifelse(!is.na(measured_value),
+                         "measured",
+                         "interpolated"))
+
+ggplot(df_long, aes(x = Depth, y = value)) +
+  geom_line(color = "black") +
+  geom_point(aes(color = status), size = 2) +
+  scale_y_reverse() +
+  facet_wrap(~variable, scales = "free_x", nrow = 1) +
+  scale_color_manual(values = c("measured" = "black",
+                                "interpolated" = "red")) +
+  labs(title = "Measured vs interpolated",
+       x = "Value",
+       y = "Depth (cm)") +
+  theme_minimal() +
+  coord_flip()
+
+#Hierarchical partitioning 
+hp_function <- function(otutable, env_data) {
+  
+  env_data <- env_data[match(rownames(otutable), env_data$SampleID), ]
+  
+  otu_pa <- ifelse(otutable > 0, 1, 0)
+  otu.jacc <- vegdist(otu_pa, method = "jaccard")
+  
+  env.list <- list(
+    Grain_size = env_data[,c("Clay","Sand")],
+    Metal = env_data[,c("Ni","Al")],
+    OM = env_data[,c("COP_perc","NT_perc")],
+    Sources = env_data["UB"],
+    Depth = env_data["Depth"],
+    Unit = env_data["Unite"]
+  )
+  
+  dbRDA.vp <- rdacca.hp(
+    otu.jacc,
+    env.list,
+    method = "dbRDA",
+    var.part = TRUE,
+    type = "adjR2"
+  )
+  
+  summary(dbRDA.vp)
+  
+  barplot_hp(dbRDA.vp, col.fill = "var")
+  return(dbRDA.vp)
+}
+
+env_inter <- df_interp %>% left_join(env_df[, c("SampleID","Depth","Unite")], by = "Depth")
+env_inter$Unite <- as.factor(env_inter$Unite)
+
+env_microeuk <- env_inter %>% filter(SampleID %in% rownames(sample_data(ps_genus)))
+env_foram <- env_inter %>%  filter(SampleID %in% foram_df$Sample[foram_df$Sum_genus > 0])
+
+micro_all <- t(as.data.frame(otu_table(ps_genus)))
+micro_rs <- t(as.data.frame(otu_table(physeq_rs_genus)))
+
+plot1_microeuk <- hp_function(micro_all, env_microeuk)
+plot2_rs_microeuk <- hp_function(micro_rs, env_microeuk)
+plot3_foram <- hp_function(foram, env_foram)
+
+# total explained variance for each group of parameter
+make_hp_table <- function(hp_obj) {
+  df <- data.frame(
+    Factor = rownames(hp_obj$Hier.part),
+    Perc_total = hp_obj$Hier.part[,"I.perc(%)"]
+  )
+  return(df)
+}
+
+# Générer les tables
+hp_table_microeuk <- make_hp_table(plot1_microeuk)
+hp_table_rs_microeuk <- make_hp_table(plot2_rs_microeuk)
+hp_table_foram <- make_hp_table(plot3_foram)
+
+plot_hp <- function(df, title) {
+  df$Factor <- factor(df$Factor, levels = c("Unit","Depth","Metal","Sources", "OM","Grain_size")) # same order
+  ggplot(df, aes(x = Factor, y = Perc_total)) +
+    geom_bar(stat = "identity", fill = "black") +
+    coord_flip() +
+    labs(x = "Factor", y = "Total contribution (%)", title = title) +
+    theme_bw() +
+    theme(
+      legend.position = "none",
+      text = element_text(size = 11),
+      axis.line = element_line(color = "black"),
+      panel.border = element_blank(),
+      panel.background = element_blank()
+    ) +
+    scale_y_continuous(limits = c(0, 45)) # même échelle
+}
+
+# Créer les plots
+p1 <- plot_hp(hp_table_microeuk, "Microeukaryote")
+p2 <- plot_hp(hp_table_rs_microeuk, "Resting stage")
+p3 <- plot_hp(hp_table_foram, "Foraminifera")
+
+# Combiner les 3 plots
+combined_hp_plot <- p1 + p2 + p3 + plot_layout(ncol = 3, guides = "collect")
+combined_hp_plot
+
+ggsave(filename = "Outputs/Figure4B_hpx3.pdf", plot = combined_hp_plot,
+       width = 200, height = 70, units = "mm", dpi = 600)
+
+```
+
+# Genus dynamics
+```{r}
 # Prepare foram data
 foram_df[is.na(foram_df)] <- 0
 rownames(foram_df) <- foram_df$Sample
@@ -618,13 +1066,13 @@ abundance_data_long$Column <- factor(abundance_data_long$Column, levels = c(
 col_fun <- colorRamp2(c(-1, 0, 1), c("#662141", "#FBFBFB", "#524657"))
 
 # Plot heatmap of selected foraminiferal genera
-fig4_foram <- ggplot(abundance_data_long, aes(x = Column, y = Row, fill = Value)) +
+fig5_foram <- ggplot(abundance_data_long, aes(x = Column, y = Row, fill = Value)) +
   geom_tile(color = "white", linewidth = 0.1) +
   scale_fill_gradientn(colors = col_fun(seq(min(abundance_data_long$Value), max(abundance_data_long$Value), length.out = 100))) +
   labs(fill = "Foraminifera presence") +
-  theme_minimal(base_size = 6) +
+  theme_minimal(base_size = 10) +
   theme(
-    axis.text.x = element_text(angle = 90, vjust = 0.5, size = 7),
+    axis.text.x = element_text(angle = 90, vjust = 0.5, size = 10),
     axis.text.y = element_text(size = 7),
     axis.title = element_blank(),
     legend.position = "none"
@@ -632,21 +1080,21 @@ fig4_foram <- ggplot(abundance_data_long, aes(x = Column, y = Row, fill = Value)
 
 ### Barpolts of filtered microeukaryote genera
 
-# Collapse ASVs to genus level
-physeq_genus <- tax_glom(ps_rs_rar, taxrank = "Genus")
+# Collapse ASVs to genus level: ps_rs_rarefied
+physeq_rs_rar_genus <- aggregate_taxa(ps_rs_rarefied, 'Genus')
 
 # Relative abundance per sample
-physeq_genus_rel <- transform_sample_counts(physeq_genus, function(x) x * 100 / sum(x))
+physeq_rs_genus_rel <- transform_sample_counts(physeq_rs_rar_genus, function(x) x * 100 / sum(x))
 
 # Filter genera: present in >4 samples 
-physeq_genus_n4 <- filter_taxa(
-  physeq_genus_rel,
+physeq_rs_genus_rel_n4 <- filter_taxa(
+  physeq_rs_genus_rel,
   function(x) sum(x > 0) > ((1/56*4)*length(x)),
   TRUE
 )
 
 # Convert to long format for tests
-genus_n4 <- psmelt(physeq_genus_n4)
+genus_n4 <- psmelt(physeq_rs_genus_rel_n4)
 
 # Aggregate data by genus, depth, and stratigraphic unit (Part2)
 df_genus <- aggregate(
@@ -655,7 +1103,7 @@ df_genus <- aggregate(
   sum
 )
 
-#--------------- Wilcoxon non-parametric analysis
+# Wilcoxon non-parametric analysis
 
 genus.all <- levels(factor(df_genus$OTU))
 tmp <- df_genus[-which(df_genus$Abundance==0),] # remove null values
@@ -716,15 +1164,47 @@ colnames(df.test) <- c("genus",
 df.test[,-1] <- apply(df.test[,-1], 2, function(x)round(as.numeric(x), 3))
 rownames(df.test) <- NULL
 
+# FDR Benjamini-Hochberg
+df.test$pval.test1.fdr <- p.adjust(df.test$pval.test1, method = "BH")
+df.test$pval.test2.fdr <- p.adjust(df.test$pval.test2, method = "BH")
+df.test$pval.test3.fdr <- p.adjust(df.test$pval.test3, method = "BH")
+
 #--- Some summary statistics
 tmp <- as.matrix(df.test[c("rel.chge.test1", "rel.chge.test2", "rel.chge.test3")])
 rownames(tmp) <- df.test$genus
 
-prop.signif <- apply(df.test[c("pval.test1", "pval.test2", "pval.test3")], 2, function(x)length(which(x<0.1))/length(x)) # proportion of species with significant effects
+prop.signif <- apply(df.test[c("pval.test1.fdr", "pval.test2.fdr", "pval.test3.fdr")], 2, function(x)length(which(x<0.1))/length(x)) # proportion of species with significant effects
 prop.decline <- apply(tmp, 2, function(x)length(which(x<0))/length(x)) # proportion of species declining regardless of significance
 prop.increase <- apply(tmp, 2, function(x)length(which(x>0))/length(x)) # proportion of species increasing regardless of significance
-med.change <- apply(tmp, 2, median, na.rm=T) # median of relative changes
-avg.change <- apply(tmp, 2, mean, na.rm=T) # average of relative changes
+
+n.signif <- apply(df.test[c("pval.test1.fdr", "pval.test2.fdr", "pval.test3.fdr")], 2, function(x) length(which(x < 0.1)))  
+n.decline <- apply(tmp, 2, function(x) length(which(x < 0))) 
+n.increase <- apply(tmp, 2, function(x) length(which(x > 0)))  
+
+# Créer des matrices logiques pour significativité
+sig1 <- df.test$pval.test1.fdr < 0.1
+sig2 <- df.test$pval.test2.fdr < 0.1
+sig3 <- df.test$pval.test3.fdr < 0.1
+
+# Nombre de genres en déclin significatif
+n.decline.sig <- c(
+  sum(tmp[,1] < 0 & sig1),
+  sum(tmp[,2] < 0 & sig2),
+  sum(tmp[,3] < 0 & sig3)
+)
+
+# Proportion de genres en déclin significatif
+prop.decline.sig <- n.decline.sig / nrow(df.test)
+
+# Nombre de genres en augmentation significative
+n.increase.sig <- c(
+  sum(tmp[,1] > 0 & sig1, na.rm = TRUE),
+  sum(tmp[,2] > 0 & sig2, na.rm = TRUE),
+  sum(tmp[,3] > 0 & sig3, na.rm = TRUE)
+)
+
+# Proportion de genres en augmentation significative
+prop.increase.sig <- n.increase.sig / nrow(df.test)
 
 #--- add Genus 
 taxo <- select(genus_n4, "Genus", "OTU")
@@ -733,9 +1213,13 @@ df.test2 <- merge(df.test,taxo,  by = "OTU")
 df.test2 <- df.test2 %>% distinct(OTU, .keep_all = TRUE)
 
 # --- Filter significant genera ---
-df_filtered <- df.test2 %>%
+df_filtered <- df.test2 %>% 
   filter(
-    pval.test1 < 0.05 | pval.test2 < 0.05 | pval.test3 < 0.05 | prop0.tot < 0.25)
+  pval.test1.fdr < 0.05 |
+  pval.test2.fdr < 0.05 |
+  pval.test3.fdr < 0.05 |
+  prop0.tot < 0.25)
+
 
 selection_genera <- df_filtered$OTU
 
@@ -745,22 +1229,24 @@ genera_filtered <- df_genus %>%
 genera_filtered$Depth_sampling <- as.numeric(genera_filtered$Depth_sampling) # 23 genera
 
 # Visualisation of some of these genera (based on theur temporal distribution and bibliographic information) 
-genera_figure <- c(" Desmodesmus"," Amoebogregarina", " Colpodella",
+genera_selected <- c(" Desmodesmus"," Amoebogregarina", " Colpodella",
                 " Fungi_XXXX", " Selenidium1"," Paracercomonas", " Scrippsiella",
-                " Coelastrum"," Paramicrosporidium")
+                " Eocercomonas"," Polyplicarium")
 
-genera_figure <- genera_filtered %>% filter(Genus %in% genera_figure)
+genera_figure <- df_genus %>% filter(Genus %in% genera_selected)
 
 genera_figure$Genus <- factor(genera_figure$Genus,
                                  levels = c(" Paracercomonas", " Amoebogregarina"," Colpodella"," Scrippsiella",
-                                            " Paramicrosporidium"," Selenidium1"," Desmodesmus"," Coelastrum",
+                                            " Selenidium1"," Eocercomonas"," Desmodesmus"," Polyplicarium",
                                             " Fungi_XXXX" ))
 
 col_vector_genus <- c("#FAACEB","#6376DB","#01579E","#7DD9F8",
-                      "#824600","#6376DB","#FFA54B","#FFA54B",
+                      "#6376DB","#FAACEB","#FFA54B","#6376DB",
                       "#824600")
 
-fig4_genus <- ggplot(genera_figure, aes(x = -Depth_sampling, y = Abundance, fill = Genus)) +
+genera_figure$Depth_sampling <- as.numeric(genera_figure$Depth_sampling)
+
+fig5_genus <- ggplot(genera_figure, aes(x = -Depth_sampling, y = Abundance, fill = Genus)) +
   geom_vline(aes(xintercept = -41), linetype = "dashed", color = "grey", size = 0.5) +
   geom_vline(aes(xintercept = -93), linetype = "dashed", color = "grey", size = 0.5) +
   geom_vline(aes(xintercept = -137), linetype = "dashed", color = "grey", size = 0.5) +
@@ -774,7 +1260,7 @@ fig4_genus <- ggplot(genera_figure, aes(x = -Depth_sampling, y = Abundance, fill
     fill = "white"
   ) +
   facet_grid(. ~ Genus, scales = "free_x") +
-  theme_pubr(base_size = 6) +
+  theme_pubr(base_size = 10) +
   labs(
     x = "Depth (cm)",
     y = "Relative Abundance among resting stage taxa"
@@ -810,16 +1296,10 @@ interpolate_na <- function(df, variables) {
 # --- Apply interpolation to selected variables ---
 variables_to_interpolate <- "Ni" #possible to select several variables
 df_interpolated <- interpolate_na(env_df, variables_to_interpolate)
-
-# --- Prepare depth factor for plotting (reverse order for vertical axis) ---
-rownames(df_interpolated) <- gsub("-", "", df_interpolated$Codification)
-df_interpolated$Depth_fact <- factor(
-  as.factor(df_interpolated$Depth),
-  levels = rev(unique(df_interpolated$Depth))
-)
+df_interpolated <- interpolate_na(env_df, variables_to_interpolate)
 
 # --- Plot Nickel concentration as a vertical gradient ---
-fig4__nickel <- ggplot(df_interpolated, aes(x = Depth_fact, y = 1, fill = Ni)) +
+fig5_nickel <- ggplot(df_interpolated, aes(x = as.factor(rev(Depth)) , y = 1, fill = Ni)) +
   geom_tile() +
   scale_fill_gradientn(colours = c("#023436", "#FFC65C", "#FF5416")) +
   labs(x = "Depth (cm)", y = NULL, fill = "Nickel (mg kg -1)") +
@@ -833,8 +1313,22 @@ fig4__nickel <- ggplot(df_interpolated, aes(x = Depth_fact, y = 1, fill = Ni)) +
     legend.position = "bottom"
   )
 
-fig4_combined <- fig4__nickel + fig4_foram + fig4_genus + plot_layout(ncol = 3,nrow=1, width = c(0.2,2,3))
-ggsave(filename = "Outputs/Figure4_genus.pdf", plot = fig4_combined,
+panel_genus <- fig5_genus / plot_spacer() + plot_layout(heights = c(4,0.8))
+fig5_combined <- fig5_nickel + fig5_foram + panel_genus + plot_layout(ncol = 3,nrow=1, width = c(0.2,2,3))
+fig5_combined
+
+ggsave(filename = "Outputs/Figure5_genus.pdf", plot = fig5_combined,
        width = 200, height = 300, units = "mm", dpi = 600)
+
+```
+
+```{r}
+
+```
+
+
+
+
+
 
 
