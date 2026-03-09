@@ -34,9 +34,9 @@ Outputs/ - Generated figures and tables
 
 [dataset_cleaning.Rmd - R script to filter raw data](https://matmey.github.io/Meyneng_NC/dataset_cleaning.html)
 
-[Main_results.Rmd - R script for all main analyses and figure generation.](https://matmey.github.io/Meyneng_NC/Main_results.html)
+[Main_results.Rmd - R script for all main analyses and figure generation.](https://matmey.github.io/Meyneng_NC/Main_Results.html)
 
-[Long-Read_analysis.md - Bash script for analysis of long-read data.](https://matmey.github.io/Meyneng_NC/Long-Read_analysis.html)
+[Long-Read_analysis.md - Bash script for analysis of long-read data.](https://matmey.github.io/Meyneng_NC/LongRead_analysis.html)
 
 [Process_LR_analysis_figure.Rmd - R script for network analysis of long read and short read.](https://matmey.github.io/Meyneng_NC/Process_LR_analysis_figure.html)
 
