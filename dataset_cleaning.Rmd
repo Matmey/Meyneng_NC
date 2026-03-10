@@ -5,11 +5,11 @@ output: html_document
 ---
 
 # Packages
-```{r, echo=FALSE}
-library(phyloseq)
-library(stringr)
-library(dplyr)
-library(tidyr)
+```{r message=FALSE, warning=FALSE}
+library(phyloseq) #1.52.0
+library(stringr) #1.6.0
+library(dplyr) #1.1.4
+library(tidyr) #1.3.1
 ```
 
 # Data import

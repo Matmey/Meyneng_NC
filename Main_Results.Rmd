@@ -6,37 +6,19 @@ output: html_document
 ---
 
 # Packages
-```{r, echo=FALSE}
-library(phyloseq)
-library(stringr)
-library(dplyr)
-library(tidyr)
-library(ggplot2)
-library(patchwork)
-library(ggpubr)
-library(forcats)
-library(vegan)
-library(ade4)
-library(adespatial)
-library(ComplexHeatmap)
-library(circlize)
-library(tibble)
-library(readr)
-library(partykit) 
-library(metagMisc)
-library(tseries)
-library(rio)
-library(lme4)
-library(sjPlot)
-library(ggridges)
-library(FactoMineR)
-library(ggside)
-library(factoextra)
-library(corrplot)
-library(metagMisc)
-library(microbiome)
-library(rdacca.hp)
-library(UpSetVP)
+```{r message=FALSE, warning=FALSE}
+packages <- c("phyloseq","stringr","dplyr","tidyr","ggplot2","patchwork","ggpubr",
+  "forcats","vegan","ade4","adespatial","ComplexHeatmap","circlize",
+  "tibble","readr","partykit","metagMisc","tseries","rio","lme4",
+  "sjPlot","ggridges","FactoMineR","ggside","factoextra","corrplot",
+  "microbiome","rdacca.hp","UpSetVP")
+
+invisible(lapply(packages, library, character.only = TRUE))
+
+data.frame(
+  Package = packages,
+  Version = sapply(packages, function(x) as.character(packageVersion(x)))
+)
 
 ```
 
@@ -53,7 +35,7 @@ rs_db_df <- read.csv("rawdata/database_RestSt.csv", header = TRUE, sep = ";", st
 
 #Al and Ni as representative metals of ultramafic and vulcanosedimentary sources
 As highlighted by PMF 5.0 model (see method ans supplementary information)
-```{r}
+```{r message=FALSE, warning=FALSE}
 metaux <- c("Li","Al","V","Cr","Mn","Fe","Co","Ni","Cu","Zn","As","Mo","Ag","Cd","Sn","Sb","Ba","Pb","U","Hg")
 
 env_metaux <- env_df %>%
@@ -101,10 +83,10 @@ corrplot(mcor_metaux,
          sig.level = 0.05,
          insig = "blank",
          diag = FALSE,
-         number.cex = 0.65)
+         number.cex = 0.50)
 ```
 
-```{r}
+```{r fig.width=7, fig.height=3.5}
 #PCA
 Col_unit <- c("#782208","#DC7242","#FBCE64","#94BB67","#3D785F")
 
@@ -267,7 +249,7 @@ ggsave("Outputs/Figure1_environment_profiles.pdf", plot = fig1_combined,
 ```
 
 # Diversity patterns corrected by sedimentation rates 
-```{r}
+```{r warning=FALSE}
 # Foraminifera
 foram_df <- foram_df %>%
   mutate(
@@ -420,20 +402,61 @@ ggsave(filename = "Outputs/Figure2_alpha_diversity.pdf", plot = fig2_combined,
 
 ```
 #Link DNA concentration, diversity and grain size
-```{r}
+```{r message=FALSE, warning=FALSE, fig.width=6, fig.height=7}
 #DNA concentration profil
 alpha_meta_df$ADN <- as.numeric(alpha_meta_df$ADN)
 
-ggplot(alpha_meta_df, aes(x = -Depth_reel, y = ADN)) +
+dna_conc <- ggplot(alpha_meta_df, aes(x = -Depth_reel, y = ADN, color = Part)) +
   geom_point(size = 1) +
-  geom_vline(xintercept = c(-41,-93,-137,-202,-226), linetype = "dashed", color = "grey") +
-  #geom_line(size = 0.9, alpha = 0.6) +
+  geom_vline(xintercept = c(-41, -93, -137, -202, -226), linetype = "dashed", color = "grey") +
+  geom_line(size = 0.9, alpha = 0.6) +
   scale_color_manual(values = Col_unit) +
-  coord_flip() + theme_pubr(base_size = 9) + 
+  coord_flip() +
+  theme_pubr(base_size = 9) +
+  theme(legend.position = "none") +
   labs(
     x = "Depth (cm)",
-    y = expression("DNA concentration (ng L{^1})")
-  ) 
+    y = "DNA concentration (ng/L)"
+  )
+
+alpha_meta_df$Clay <- as.numeric(alpha_meta_df$Clay)
+
+clay_dna <- ggplot(alpha_meta_df, aes(x = Clay, y = ADN, color = Part)) +
+  geom_point(size = 1) +
+  geom_smooth(aes(group = 1), method = "lm", se = TRUE, color = "black") +
+  stat_regline_equation(aes(label = paste(..rr.label..)), 
+                        formula = y ~ x, 
+                        label.x.npc = "left", 
+                        label.y.npc = 0.95, 
+                        color = "black") +
+  scale_color_manual(values = Col_unit) +
+  theme_pubr(base_size = 9) +
+  labs(
+    x = "Clay proportion (%)",
+    y = "DNA concentration (ng/L)"
+  )
+
+asv_dna <- ggplot(alpha_meta_df, aes(x = Observed, y = ADN, color = Part)) +
+  geom_point(size = 1) +
+  geom_smooth(aes(group = 1), method = "lm", se = TRUE, color = "black") +
+  stat_regline_equation(aes(label = paste(..rr.label..)), 
+                        formula = y ~ x, 
+                        label.x.npc = "left", 
+                        label.y.npc = 0.95, 
+                        color = "black") +
+  scale_color_manual(values = Col_unit) +
+  theme_pubr(base_size = 9) +
+  labs(
+    x = "ASV number",
+    y = "DNA concentration (ng/L)"
+  )
+
+plot_dna <- clay_dna / asv_dna
+combined_plot_dna <- dna_conc + plot_dna +
+  plot_layout(guides = "collect") & 
+  theme(legend.position = "bottom") 
+combined_plot_dna
+
 ```
 
 Compare with microeukaryote rarefied dataset
@@ -539,7 +562,7 @@ ggsave(filename = "Outputs/Fig2_rarefied.pdf", plot = fig2_combined,
 
 ```
 
-```{r}
+```{r, message=FALSE, warning=FALSE}
 # Pairwise Wilcoxon among units
 pairwise_result_asv <- pairwise.wilcox.test(
   x = alpha_meta_df$alpha_observed,
@@ -562,7 +585,7 @@ pval_foram
 ```
 
 # Composition of microeukaryote community 
-```{r}
+```{r fig.width=9, fig.height=8}
 
 # Resting-stage and unknown-genus subsets (using rs_db_df)
 asv_rs_all <- rs_db_df %>% filter(RestingStage == 1) %>% pull(1) %>% na.omit() #based on functional database of Ramond et al., 2018 and additional literature when necessary
@@ -768,7 +791,7 @@ ggsave(filename = "Outputs/Figure3_rarefied_composition.pdf", plot = fig3_combin
 ```
 
 # Structure changes in each community
-```{r}
+```{r fig.width=8, fig.height=3}
 #All aggregate at the genus level for homogeneity
 
 #microeukaryote community: ps_rarefied / ps_alpha
@@ -786,7 +809,7 @@ foram_sup0 <- foram_df %>%
   filter(Sum_genus > 0) #remove 10 samples with 0 individual found
 foram <- foram_sup0[,c(9:33)]
 
-#Tous les ASVs
+#Microeuk
 microeuk_df <- t(as.data.frame(otu_table(ps_genus)))
 rs_df <- t(as.data.frame(otu_table(physeq_rs_genus)))
 
@@ -859,7 +882,7 @@ ggsave(filename = "Outputs/Figure4_pcoax3.pdf", plot = combined_pcoa,
 
 ```
 # Influence of several group of parameters on this structure
-```{r}
+```{r message=FALSE, warning=FALSE, fig.width=8, fig.height=5}
 #First need interpolation to compare biological and environmental data at the same depth
 env <- env_df %>% mutate(across(c(UB, VS, Clay, Silt, Sand, Ni, Al, COP_perc, NT_perc), 
                              ~as.numeric(gsub(",", ".", .))))
@@ -925,8 +948,12 @@ ggplot(df_long, aes(x = Depth, y = value)) +
   labs(title = "Measured vs interpolated",
        x = "Value",
        y = "Depth (cm)") +
-  theme_minimal() +
+  theme_minimal(base_size = 8) +
   coord_flip()
+
+```
+
+```{r message=FALSE, warning=FALSE, fig.width=7, fig.height=4}
 
 #Hierarchical partitioning 
 hp_function <- function(otutable, env_data) {
@@ -981,7 +1008,7 @@ make_hp_table <- function(hp_obj) {
   return(df)
 }
 
-# Générer les tables
+# Tables
 hp_table_microeuk <- make_hp_table(plot1_microeuk)
 hp_table_rs_microeuk <- make_hp_table(plot2_rs_microeuk)
 hp_table_foram <- make_hp_table(plot3_foram)
@@ -1003,12 +1030,11 @@ plot_hp <- function(df, title) {
     scale_y_continuous(limits = c(0, 45)) # même échelle
 }
 
-# Créer les plots
 p1 <- plot_hp(hp_table_microeuk, "Microeukaryote")
 p2 <- plot_hp(hp_table_rs_microeuk, "Resting stage")
 p3 <- plot_hp(hp_table_foram, "Foraminifera")
 
-# Combiner les 3 plots
+# Combine
 combined_hp_plot <- p1 + p2 + p3 + plot_layout(ncol = 3, guides = "collect")
 combined_hp_plot
 
@@ -1018,7 +1044,7 @@ ggsave(filename = "Outputs/Figure4B_hpx3.pdf", plot = combined_hp_plot,
 ```
 
 # Genus dynamics
-```{r}
+```{r message=FALSE, warning=FALSE, fig.width=8, fig.height=11}
 # Prepare foram data
 foram_df[is.na(foram_df)] <- 0
 rownames(foram_df) <- foram_df$Sample
@@ -1108,9 +1134,9 @@ df_genus <- aggregate(
 genus.all <- levels(factor(df_genus$OTU))
 tmp <- df_genus[-which(df_genus$Abundance==0),] # remove null values
 genus.non.null <- table(tmp$OTU)
-table(tmp$OTU, tmp$Unit) # non null samples per genus and periods
+#table(tmp$OTU, tmp$Unit) # non null samples per genus and periods
 
-# We want to test differences between periods III and IV (shovel vs. pristine); II and III (tractor vs. shovel); I and II (Resilience)
+# We want to test differences between periods III and IV (shovel vs. pristine); II and III (tractor vs. shovel); I and II (Regulation effect)
 
 df.test <- NULL
 
@@ -1144,7 +1170,7 @@ for(i in 1:length(genus.all)){
   rel.chge2 <- ((avg.abd[2]+1) - (avg.abd[3]+1))/(avg.abd[3]+1)*100
   pval2 <- test2$p.value
   
-  #---- test 3 (Resilience)
+  #---- test 3 (Regulation effect)
   test3 <- wilcox.test(genus.i.period.1$Abundance, genus.i.period.2$Abundance)
   rel.chge3 <- ((avg.abd[1]+1) - (avg.abd[2]+1))/(avg.abd[2]+1)*100
   pval3 <- test3$p.value
@@ -1260,7 +1286,7 @@ fig5_genus <- ggplot(genera_figure, aes(x = -Depth_sampling, y = Abundance, fill
     fill = "white"
   ) +
   facet_grid(. ~ Genus, scales = "free_x") +
-  theme_pubr(base_size = 10) +
+  theme_pubr(base_size = 8) +
   labs(
     x = "Depth (cm)",
     y = "Relative Abundance among resting stage taxa"
@@ -1308,7 +1334,7 @@ fig5_nickel <- ggplot(df_interpolated, aes(x = as.factor(rev(Depth)) , y = 1, fi
   theme(
     axis.text.x = element_text(angle = 90, vjust = 0.5, size = 6),
     axis.title.y = element_blank(),
-    axis.text.y = element_text(size = 6),
+    axis.text.y = element_text(size = 4),
     panel.grid = element_blank(),
     legend.position = "bottom"
   )
